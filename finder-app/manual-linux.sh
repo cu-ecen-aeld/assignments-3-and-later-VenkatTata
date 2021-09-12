@@ -105,7 +105,7 @@ ${CROSS_COMPILE}readelf -a bin/busybox | grep "Shared library"
 
 #SYSROOT was exported by adding the following command to the end of the ~./bashrc file
 #export SYSROOT=/home/venkat/Downloads/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu/bin/../aarch64-none-linux-gnu/libc
-
+export SYSROOT=$(${CROSS_COMPILE}gcc -print-sysroot)
 
 
 # TODO: Add library dependencies to rootfs
@@ -124,7 +124,7 @@ sudo mknod -m 600 dev/console c 5 1
 
 # TODO: Clean and build the writer utility
 #changing directory to assignment 3 directory
-cd ~/Desktop/ECEN5713_AESD/assignments-3-and-later-VenkatTata/finder-app/
+cd $FINDER_APP_DIR/
 
 #Cleaning and building the writer utility with cross compiler
 make clean
@@ -132,11 +132,11 @@ make CROSS_COMPILE=${CROSS_COMPILE}
 
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
-cp ~/Desktop/ECEN5713_AESD/assignments-3-and-later-VenkatTata/finder-app/finder-test.sh ${OUTDIR}/rootfs/home
-cp ~/Desktop/ECEN5713_AESD/assignments-3-and-later-VenkatTata/finder-app/conf/ -r ${OUTDIR}/rootfs/home
-cp ~/Desktop/ECEN5713_AESD/assignments-3-and-later-VenkatTata/finder-app/finder.sh ${OUTDIR}/rootfs/home
-cp ~/Desktop/ECEN5713_AESD/assignments-3-and-later-VenkatTata/finder-app/writer ${OUTDIR}/rootfs/home
-cp ~/Desktop/ECEN5713_AESD/assignments-3-and-later-VenkatTata/finder-app/autorun-qemu.sh ${OUTDIR}/rootfs/home
+cp $FINDER_APP_DIR/finder-test.sh ${OUTDIR}/rootfs/home
+cp $FINDER_APP_DIR/conf/ -r ${OUTDIR}/rootfs/home
+cp $FINDER_APP_DIR/finder.sh ${OUTDIR}/rootfs/home
+cp $FINDER_APP_DIR/writer ${OUTDIR}/rootfs/home
+cp $FINDER_APP_DIR/autorun-qemu.sh ${OUTDIR}/rootfs/home
 
 # TODO: Chown the root directory
 # Making the contents owned by root (Chown the root directory)
