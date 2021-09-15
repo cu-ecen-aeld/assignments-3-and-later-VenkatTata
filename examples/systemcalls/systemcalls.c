@@ -1,4 +1,18 @@
 #include "systemcalls.h"
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+/**
+ * Author: Venkat Sai Krishna Tata
+ * Date: 09/10/2021
+ * Brief: Performs system calls using system() function, equivalent fork, execv, wait functionality 
+ * 		  and also, redirects standard output to text file
+ * Reference : https://stackoverflow.com/a/13784315/1446624
+ * 			   Dan Walkes' starter code present in systemcalls.c  
+*/
 
 /**
  * @param cmd the command to execute with system()
@@ -9,14 +23,16 @@
 */
 bool do_system(const char *cmd)
 {
-
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the dmd
- *   and return a boolean true if the system() call completed with success 
- *   or false() if it returned a failure
-*/
-
+	int ret_val=system(cmd);
+	
+	//On an invocation of system with a non- NULL command, zero value returned when shell is available
+	//returns -1 when status of child process could not be retrieved, 
+	//returns -127 when the shell could not be executed and returns exit code of system call if succeeds
+	if(ret_val == 0 && cmd==NULL)
+		return false;
+	else if (ret_val == -1 || ret_val ==127)
+		return false;
+	else
     return true;
 }
 
@@ -40,28 +56,52 @@ bool do_exec(int count, ...)
     va_start(args, count);
     char * command[count+1];
     int i;
+    int child_status;
+    int exec_ret_value=0,ret_status;
     for(i=0; i<count; i++)
     {
         command[i] = va_arg(args, char *);
-    }
+	}
+
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
     command[count] = command[count];
-
-/*
- * TODO:
- *   Execute a system command by calling fork, execv(),
- *   and wait instead of system (see LSP page 161).
- *   Use the command[0] as the full path to the command to execute
- *   (first argument to execv), and use the remaining arguments
- *   as second argument to the execv() command.
- *   
-*/
+    
+    
+    //Fork to create a child process while the parent process is intact
+	pid_t pid;
+	pid = fork();
+	
+	//If could not fork, no child created and pid return value is negative
+	if(pid == -1)
+		exec_ret_value=0;
+	else if (pid == 0) //If current process is child process, execute command
+	{
+		ret_status=execv(command[0],command);
+		if(ret_status==-1)
+			exit(EXIT_FAILURE);
+	}
+	
+	//Wait for child to terminate, returns -1 on error of any sort
+	//else returns the exit code after replacing the child process and running the command provided in the shell
+	//of the child. Based on the exit code, if command successfully executed, returns true else false
+	if (waitpid (-1, &child_status, 0) == -1)
+			exec_ret_value=0;
+	else if (WIFEXITED (child_status))
+	{
+		if(WEXITSTATUS(child_status)==0)
+			exec_ret_value=1;
+		else 
+			exec_ret_value=0;		
+	}
+	else
+		exec_ret_value=0;
 
     va_end(args);
 
-    return true;
+	//Return true or false based on the success of execution of provided command
+    return exec_ret_value;
 }
 
 /**
@@ -74,7 +114,9 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     va_list args;
     va_start(args, count);
     char * command[count+1];
+    int child_status;
     int i;
+    int exec_ret_value=0,ret_status;
     for(i=0; i<count; i++)
     {
         command[i] = va_arg(args, char *);
@@ -82,18 +124,46 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    command[count] = command[count];	
 
+//  redirect standard out to a file specified by outputfile
+	int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+	dup2(fd, 1);
+	
+	//Fork to create a child process while the parent process is intact    
+	pid_t pid;
+	pid = fork();
+	
+	//If could not fork, no child created and pid return value is negative
+	if(pid == -1)
+		exec_ret_value=0;
+	else if (pid == 0) //If current process is child process, execute command
+	{
+		ret_status=execv(command[0],command);
+		if(ret_status==-1)
+			exit(EXIT_FAILURE);
+	}
+	
+	//Wait for child to terminate, returns -1 on error of any sort
+	//else returns the exit code after replacing the child process and running the command provided in the shell
+	//of the child. Based on the exit code, if command successfully executed, returns true else false
 
-/*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
- *   redirect standard out to a file specified by outputfile.
- *   The rest of the behaviour is same as do_exec()
- *   
-*/
+	if (waitpid (-1, &child_status, 0) == -1)
+			exec_ret_value=0;
+	else if (WIFEXITED (child_status))
+	{
+		if(WEXITSTATUS(child_status)==0)
+			exec_ret_value=1;
+		else 
+			exec_ret_value=0;		
+	}
+	else
+		exec_ret_value=0;
 
+	//Return true or false based on the success of execution of provided command
     va_end(args);
     
-    return true;
+    //Close the file descriptor
+    close(fd);
+    return exec_ret_value;
 }
