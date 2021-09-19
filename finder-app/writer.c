@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
 	
 	//File I/O to open file with read and write permissions for user
 	int assign2_fd;
-	assign2_fd=open(argv[1],O_CREAT|O_RDWR,S_IWUSR|S_IRUSR);
+	assign2_fd=open(argv[1],O_CREAT|O_RDWR,0644);
 	
 	//If path not correct, cannot create file and the error is logged
 	//else, writes the string passed as second argument to the file passed as first
