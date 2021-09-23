@@ -1,6 +1,6 @@
 #include <stdbool.h>
 #include <pthread.h>
-
+#define CONVERT_MS_to_US 1000
 /**
  * This structure should be dynamically allocated and passed as
  * an argument to your thread using pthread_create.
@@ -19,7 +19,11 @@ struct thread_data{
      * Set to true if the thread completed with success, false
      * if an error occurred.
      */
+    int wait_ms_obtain;
+    int wait_ms_release;
+    pthread_mutex_t *mutex_lock;
     bool thread_complete_success;
+    pthread_t thread_id;
 };
 
 

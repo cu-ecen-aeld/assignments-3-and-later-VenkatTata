@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #Script to write (or create, if not already present) to a file with the string
 #passed as the second parameter. The first parameter being a valid file path
 #Author: Venkat Tata
