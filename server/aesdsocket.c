@@ -28,12 +28,13 @@
 #include <getopt.h>
 #include <errno.h>
 
+//MACROS
 #define PORT "9000"
 #define BACKLOG 10
 #define CHUNK_SIZE 400
 #define TEST_FILE  "/var/tmp/aesdsocketdata"
 
-int serv_sock_fd,client_sock_fd,output_file_fd, total_length,len,capacity;
+int serv_sock_fd,client_sock_fd,output_file_fd, total_length,len,capacity,counter=1;
 struct sockaddr_in conn_addr;
 
 //Below function referenced from https://beej.us/guide/bgnet/html/
@@ -235,7 +236,7 @@ int main(int argc, char *argv[])
 			exit(-1);
 		}
 		int loc=0;
-		int chunk=CHUNK_SIZE;
+
 		//block the signals before recieving packets and sending back
 		int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
 		if(merr == -1)
@@ -252,24 +253,20 @@ int main(int argc, char *argv[])
 				exit(-1);
 			}
 			
-			//Update the current location
+			if(strchr(buf_data ,'\n') != NULL)
+				break;
+			//Update the current location if newline not found
 			loc+=len;
 			
-			//If recieved length greater than the chunk size, reallocate
-			//also, have to check if new line is not found
-			if((len >= CHUNK_SIZE)&&(strchr(buf_data ,'\n') == NULL))
-			{	
-				//Add one more chunk and increase the dynamic memory	
-				chunk +=CHUNK_SIZE;
-				buf_data=(char*)realloc(buf_data,(chunk*sizeof(char)));
-				if(buf_data==NULL)
-				{
-					syslog(LOG_ERR,"Error: realloc failed");
-					exit(-1);
-				}
+			//if no new line character, need to add more memory and dynamically
+			//reallocate with an extra chunk
+			counter++;
+			buf_data=(char*)realloc(buf_data,((counter*CHUNK_SIZE)*sizeof(char)));
+			if(buf_data==NULL)
+			{
+				syslog(LOG_ERR,"Error: realloc failed");
+				exit(-1);
 			}
-			else
-				break; //break when newline found
 		}
 
 			
@@ -319,10 +316,3 @@ int main(int argc, char *argv[])
     }
 	return 0;
 }	
-	
-	
-	
-	
-
-
-	
