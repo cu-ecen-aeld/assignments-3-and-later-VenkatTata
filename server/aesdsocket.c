@@ -28,7 +28,6 @@
 #include <getopt.h>
 #include <errno.h>
 
-//MACROS
 #define PORT "9000"
 #define BACKLOG 10
 #define CHUNK_SIZE 400
