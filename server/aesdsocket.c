@@ -28,7 +28,7 @@
 #include <getopt.h>
 #include <errno.h>
 
-//MACROS
+
 #define PORT "9000"
 #define BACKLOG 10
 #define CHUNK_SIZE 400
@@ -47,6 +47,30 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+//Function handles all open files when there is an error
+void close_all()
+{
+	close(client_sock_fd);
+	//Close server socket fd
+	close(serv_sock_fd);
+	//Close regular file - output file fd
+	close(output_file_fd);
+	
+	//After completing above procedure successfuly, exit logged
+	syslog(LOG_DEBUG,"Caught signal, exiting");
+	
+	//Close the syslog once all of logging is complete
+	closelog();
+	
+	
+	
+	//Delete and unlink the file
+	if(remove(TEST_FILE) == -1)
+	{
+		perror("file remove error");
+	}
+}
+	
 //Signal handler for Signals SIGTERM and SIGINT
 static void signal_handler(int signo)
 {
@@ -142,6 +166,7 @@ int main(int argc, char *argv[])
 	int dummie =1;
 	if (setsockopt(serv_sock_fd, SOL_SOCKET, SO_REUSEADDR, &dummie, sizeof(int)) == -1) 
 	{	
+		
 		perror("setsockopt error");
     }
 	//Assign address to the socket created
@@ -218,6 +243,7 @@ int main(int argc, char *argv[])
 		if(client_sock_fd ==-1)
 		{
 			//If no incoming connection, graceful termination done
+			close_all();
 			exit(-1);
 		}
 		
@@ -233,6 +259,7 @@ int main(int argc, char *argv[])
 		if(buf_data==NULL)
 		{
 			syslog(LOG_ERR,"Error: malloc failed");
+			close_all();
 			exit(-1);
 		}
 		int loc=0;
@@ -242,6 +269,7 @@ int main(int argc, char *argv[])
 		if(merr == -1)
 		{
 			perror("sigprocmask block error");
+			close_all();
 			exit(-1);
 		}
 		//Recieve the data and store in updated location always if available
@@ -250,6 +278,7 @@ int main(int argc, char *argv[])
 			if(len == -1)
 			{
 				perror("recv error");
+				close_all();
 				exit(-1);
 			}
 			
@@ -265,6 +294,7 @@ int main(int argc, char *argv[])
 			if(buf_data==NULL)
 			{
 				syslog(LOG_ERR,"Error: realloc failed");
+				close_all();
 				exit(-1);
 			}
 		}
@@ -272,8 +302,10 @@ int main(int argc, char *argv[])
 			
 		//Write to file and position is updated
 		int werr = write(output_file_fd,buf_data,strlen(buf_data));
-		if (werr == -1){
+		if (werr == -1)
+		{
 			perror("write error");
+			close_all();
 			exit(-1);
 		}
 		
@@ -289,8 +321,10 @@ int main(int argc, char *argv[])
 		
 		int rerr=read(output_file_fd,send_data_buf,total_length);
 		syslog(LOG_DEBUG,"%d",total_length);
-		if (rerr == -1){
+		if (rerr == -1)
+		{
 			perror("read error");
+			close_all();
 			exit(-1);
 		}
 		
@@ -299,7 +333,9 @@ int main(int argc, char *argv[])
 		int serr=send(client_sock_fd,send_data_buf,total_length, 0);
 		if(serr == -1)
 		{
+			close_all();
 			perror("send error");
+			exit(-1);
 		}
 
 		//Once complete, buffer cleared
@@ -311,6 +347,7 @@ int main(int argc, char *argv[])
 		if(merr == -1)
 		{
 			perror("sigprocmask unblock error");
+			close_all();
 			exit(-1);
 		}
     }
