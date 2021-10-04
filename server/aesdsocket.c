@@ -34,8 +34,10 @@
 #define CHUNK_SIZE 400
 #define TEST_FILE  "/var/tmp/aesdsocketdata"
 
-int serv_sock_fd,client_sock_fd,output_file_fd, total_length,len,capacity,counter=1;
+int serv_sock_fd,client_sock_fd,output_file_fd, total_length,len,capacity,counter=1,close_err;
 struct sockaddr_in conn_addr;
+char IP_addr[INET6_ADDRSTRLEN];
+		
 
 //Below function referenced from https://beej.us/guide/bgnet/html/
 void *get_in_addr(struct sockaddr *sa)
@@ -50,6 +52,9 @@ void *get_in_addr(struct sockaddr *sa)
 //Function handles all open files when there is an error
 void close_all()
 {
+	//Functions called due to an error, hence close files errno not 
+	//checked in this function
+	//All close errors handled in signal handler when no error occured
 	close(client_sock_fd);
 	//Close server socket fd
 	close(serv_sock_fd);
@@ -62,8 +67,6 @@ void close_all()
 	//Close the syslog once all of logging is complete
 	closelog();
 	
-	
-	
 	//Delete and unlink the file
 	remove(TEST_FILE);
 
@@ -72,26 +75,44 @@ void close_all()
 //Signal handler for Signals SIGTERM and SIGINT
 static void signal_handler(int signo)
 {
-		//Close socket fd recieved by accept
-        close(client_sock_fd);
-		//Close server socket fd
-        close(serv_sock_fd);
-		//Close regular file - output file fd
-        close(output_file_fd);
-		
-		//After completing above procedure successfuly, exit logged
-        syslog(LOG_DEBUG,"Caught signal, exiting");
-        
-        //Close the syslog once all of logging is complete
-        closelog();
-		
-		
-		
-        //Delete and unlink the file
-        if(remove(TEST_FILE) == -1)
-        {
-            perror("file remove error");
-        }
+	close_err=close(client_sock_fd);
+	if(close_err == -1)
+	{
+		close_all();
+		perror("close client socket error");
+		exit(-1);
+	}
+
+	//Close server socket fd
+	close_err=close(serv_sock_fd);
+	if(close_err == -1)
+	{
+		close_all();
+		perror("close server socket error");
+		exit(-1);
+	}
+	
+	//Close regular file - output file fd
+	close_err=close(output_file_fd);
+	if(close_err == -1)
+	{
+		close_all();
+		perror("close output file error");
+		exit(-1);
+	}
+	//Once connection closed, logs status
+	syslog(LOG_DEBUG, "Closed connection from %s",IP_addr);
+	//After completing above procedure successfuly, exit logged
+	syslog(LOG_DEBUG,"Caught signal, exiting");
+	
+	//Close the syslog once all of logging is complete
+	closelog();
+	
+	//Delete and unlink the file
+	if(remove(TEST_FILE) == -1)
+	{
+		perror("file remove error");
+	}
 }
 int main(int argc, char *argv[])
 {
@@ -212,7 +233,7 @@ int main(int argc, char *argv[])
 			exit(-1);
 		}
 		
-		//Should close if any open files, skipping that here
+		//Should close if any open files, skipping that helre
 		//Redirect Stdin,stdout,stderr to /dev/null
 		open ("/dev/null", O_RDWR); 
 		dup (0); 
@@ -253,7 +274,6 @@ int main(int argc, char *argv[])
 		//Below line of code reference: https://beej.us/guide/bgnet/html/
 		//Check if the connection address family is IPv4 or IPv6 and retrieve accordingly
 		//Convert the binary to text before logging 
-		char IP_addr[INET6_ADDRSTRLEN];
 		inet_ntop(AF_INET, get_in_addr((struct sockaddr *)&conn_addr), IP_addr, sizeof(IP_addr));
         syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);   
 			
