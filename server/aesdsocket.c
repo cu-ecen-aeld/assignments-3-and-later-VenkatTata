@@ -136,6 +136,15 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 	
+		
+	//Creating an end point for communication with type = SOCK_STREAM(connection oriented)
+	//and protocol =0 which allows to use appropriate protocol (TCP) here
+	serv_sock_fd=socket(AF_INET,SOCK_STREAM,0);
+	if(serv_sock_fd==-1)
+	{
+		perror("socket error");
+		exit(-1);
+	}
 	
 	//With node as null and ai_flags as AI_PASSIVE, the socket address 
 	//will be suitable for binding a socket that will accept connections
@@ -152,15 +161,7 @@ int main(int argc, char *argv[])
 		perror("getaddrinfo error");
 		exit(-1);
 	}
-	
-	//Creating an end point for communication with type = SOCK_STREAM(connection oriented)
-	//and protocol =0 which allows to use appropriate protocol (TCP) here
-	serv_sock_fd=socket(AF_INET,SOCK_STREAM,0);
-	if(serv_sock_fd==-1)
-	{
-		perror("socket error");
-		exit(-1);
-	}
+
 	
 	//Set options on socket to prevent binding errors from ocurring
 	int dummie =1;
@@ -237,7 +238,7 @@ int main(int argc, char *argv[])
 	while(1)
 	{
 		
-		socklen_t conn_addr_len;
+		socklen_t conn_addr_len=sizeof(conn_addr);
 		//Accept an incoming connection
 		client_sock_fd = accept(serv_sock_fd, (struct sockaddr *)&conn_addr, &conn_addr_len);
 		if(client_sock_fd ==-1)
