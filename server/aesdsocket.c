@@ -65,10 +65,8 @@ void close_all()
 	
 	
 	//Delete and unlink the file
-	if(remove(TEST_FILE) == -1)
-	{
-		perror("file remove error");
-	}
+	remove(TEST_FILE);
+
 }
 	
 //Signal handler for Signals SIGTERM and SIGINT
@@ -136,20 +134,12 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 	
-		
-	//Creating an end point for communication with type = SOCK_STREAM(connection oriented)
-	//and protocol =0 which allows to use appropriate protocol (TCP) here
-	serv_sock_fd=socket(AF_INET,SOCK_STREAM,0);
-	if(serv_sock_fd==-1)
-	{
-		perror("socket error");
-		exit(-1);
-	}
-	
 	//With node as null and ai_flags as AI_PASSIVE, the socket address 
 	//will be suitable for binding a socket that will accept connections
 	struct addrinfo hints;
 	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
 	struct addrinfo *res;
 	
@@ -162,7 +152,18 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
+
+    
+    //Creating an end point for communication with type = SOCK_STREAM(connection oriented)
+	//and protocol =0 which allows to use appropriate protocol (TCP) here
+	serv_sock_fd=socket(res->ai_family,res->ai_socktype,res->ai_protocol);
+	if(serv_sock_fd==-1)
+	{
+		perror("socket error");
+		exit(-1);
+	}
 	
+		
 	//Set options on socket to prevent binding errors from ocurring
 	int dummie =1;
 	if (setsockopt(serv_sock_fd, SOL_SOCKET, SO_REUSEADDR, &dummie, sizeof(int)) == -1) 
@@ -170,6 +171,7 @@ int main(int argc, char *argv[])
 		
 		perror("setsockopt error");
     }
+    
 	//Assign address to the socket created
 	rc=bind(serv_sock_fd, res->ai_addr, res->ai_addrlen);
 	if(rc==-1)
