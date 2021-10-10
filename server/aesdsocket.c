@@ -62,7 +62,8 @@ struct slist_data_s{
 slist_data_t *slist_ptr = NULL;
 SLIST_HEAD(slisthead,slist_data_s) head;
 
-pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t file_mutex;
+
 
 typedef struct thread_data
 {
@@ -102,7 +103,8 @@ void close_all()
     {
 		perror("timer delete error");
 	}
-
+	
+	pthread_mutex_destroy(&file_mutex);
     // close log
     closelog();
 
@@ -156,6 +158,7 @@ static void timer_thread(union sigval sigval)
 		exit(-1);
 	}
 	
+	
 
 }
 
@@ -184,7 +187,7 @@ void handle_connection(void *threadp)
 	char *buf_data=calloc(CHUNK_SIZE,sizeof(char));
 	if(buf_data==NULL)
 	{
-		syslog(LOG_ERR,"Error: malloc failed");
+		syslog(LOG_ERR,"calloc failed");
 		close_all();
 		exit(-1);
 	}
@@ -198,6 +201,7 @@ void handle_connection(void *threadp)
 		close_all();
 		exit(-1);
 	}
+	
 	//Recieve the data and store in updated location always if available
 	while((len=recv(threadsock->client_socket , buf_data + loc , CHUNK_SIZE , 0))>0)
 	{
@@ -219,7 +223,7 @@ void handle_connection(void *threadp)
 		buf_data=(char*)realloc(buf_data,((counter*CHUNK_SIZE)*sizeof(char)));
 		if(buf_data==NULL)
 		{
-			syslog(LOG_ERR,"Error: realloc failed");
+			syslog(LOG_ERR,"error realloc");
 			close_all();
 			exit(-1);
 		}
@@ -253,7 +257,6 @@ void handle_connection(void *threadp)
 		close_all();
 		exit(-1);
 	}
-	
 	int rerr=read(threadsock->fd,send_data_buf,total_length+timestamp_len);
 	//syslog(LOG_DEBUG,"read length %d",total_length);
 	if (rerr == -1)
@@ -273,6 +276,9 @@ void handle_connection(void *threadp)
 		exit(-1);
 	}
 	
+	free(buf_data);
+	free(send_data_buf);
+	
 	rc=pthread_mutex_unlock(&file_mutex);
 	if(rc !=0)
     {
@@ -282,8 +288,7 @@ void handle_connection(void *threadp)
 
 	threadsock->thread_complete_success = true;
 	//Once complete, buffer cleared
-	free(buf_data);
-	free(send_data_buf);
+
 	
 	//Unblock the set of signals once complete
 	merr=sigprocmask(SIG_UNBLOCK, &(threadsock->mask), NULL);
@@ -495,6 +500,8 @@ int main(int argc, char *argv[])
 		//Convert the binary to text before logging 
 		inet_ntop(AF_INET, get_in_addr((struct sockaddr *)&conn_addr), IP_addr, sizeof(IP_addr));
         syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);   
+		
+		pthread_mutex_init( &file_mutex, NULL);
 		
 		//Singely linked list to manage thread parameters
 		slist_ptr = (slist_data_t*)malloc(sizeof(slist_data_t));
