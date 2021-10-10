@@ -5,10 +5,10 @@ all: aesdsocket
 
 clean:
 		-rm -f *.o aesdsocket
-
-%.o:%.c
-	$(CROSS_COMPILE)$(CC) -c -o $@ $< -Wall -Werror
 	
 aesdsocket:aesdsocket.o
-	$(CROSS_COMPILE)$(CC) -o $@ $^
+	$(CROSS_COMPILE)$(CC) -Wall -Werror -g -o aesdsocket aesdsocket.o -lrt -lpthread
+
+aesdsocket.o: aesdsocket.c
+	$(CROSS_COMPILE)$(CC) -Wall -Werror -g -c aesdsocket.c queue.h
 	

@@ -26,28 +26,50 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <getopt.h>
+#include <time.h>
+#include <pthread.h>	
 #include <errno.h>
+#include "queue.h"
+#include <stdbool.h>
 
 
 #define PORT "9000"
 #define BACKLOG 10
-#define CHUNK_SIZE 400
+#define CHUNK_SIZE 500
 #define TEST_FILE  "/var/tmp/aesdsocketdata"
-
+int timestamp_len=0;
 int serv_sock_fd,client_sock_fd,output_file_fd, total_length,len,capacity,counter=1,close_err;
 struct sockaddr_in conn_addr;
 char IP_addr[INET6_ADDRSTRLEN];
-		
+timer_t timerid;
+sigset_t socket_set;
 
-//Below function referenced from https://beej.us/guide/bgnet/html/
-void *get_in_addr(struct sockaddr *sa)
+typedef struct{
+    pthread_t threads;
+    int fd;
+    int client_socket;
+    sigset_t mask;
+    bool thread_complete_success;
+}threadParams_t;
+
+//Reference : https://blog.taborkelly.net/programming/c/2016/01/09/sys-queue-example.html
+typedef struct slist_data_s slist_data_t;
+struct slist_data_s{
+    threadParams_t threadParams;
+    SLIST_ENTRY(slist_data_s) entries;
+};
+
+slist_data_t *slist_ptr = NULL;
+SLIST_HEAD(slisthead,slist_data_s) head;
+
+pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct thread_data
 {
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
+    int fd;
+    
+}thread_data;
 
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
 
 //Function handles all open files when there is an error
 void close_all()
@@ -55,8 +77,6 @@ void close_all()
 	//Functions called due to an error, hence close files errno not 
 	//checked in this function
 	//All close errors handled in signal handler when no error occured
-	close(client_sock_fd);
-	//Close server socket fd
 	close(serv_sock_fd);
 	//Close regular file - output file fd
 	close(output_file_fd);
@@ -69,51 +89,214 @@ void close_all()
 	
 	//Delete and unlink the file
 	remove(TEST_FILE);
+	
+    // free Linked list
+    while(!SLIST_EMPTY(&head))
+    {
+        slist_ptr = SLIST_FIRST(&head);
+        SLIST_REMOVE_HEAD(&head,entries);
+        free(slist_ptr);
+    }
+	
+    if(timer_delete(timerid) == -1)
+    {
+		perror("timer delete error");
+	}
+
+    // close log
+    closelog();
 
 }
+
+static void timer_thread(union sigval sigval)
+{
+	int rc=pthread_mutex_lock(&file_mutex);
+	if(rc !=0)
+	{
+		close_all();
+		exit(-1);
+	}
+    
+	struct thread_data *td = (struct thread_data*) sigval.sival_ptr;
+    char time_string[45];
+
+    time_t rtime;
+	time(&rtime);
+	 
+    size_t size= strftime(time_string,100,"timestamp:%a, %d %b %Y %T %z\n",localtime(&rtime));
+
+    int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
+	if(merr == -1)
+	{
+		perror("sigprocmask unblock error");
+		close_all();
+		exit(-1);
+	}
+	timestamp_len=size;
+
+    // Write to file
+    int wbytes = write(td->fd,time_string,size);
+    if (wbytes == -1){
+        perror("write error");
+        close_all();
+        exit(-1);
+    }
+    
+    rc=pthread_mutex_unlock(&file_mutex);
+    if(rc !=0)
+    {
+		close_all();
+		exit(-1);
+	}
+	merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
+	if(merr == -1)
+	{
+		perror("sigprocmask unblock error");
+		close_all();
+		exit(-1);
+	}
 	
+
+}
+
+//Below function referenced from https://beej.us/guide/bgnet/html/
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
 //Signal handler for Signals SIGTERM and SIGINT
 static void signal_handler(int signo)
 {
-	close_err=close(client_sock_fd);
-	if(close_err == -1)
+	//thread safe disabling of both reading and writing
+	shutdown(serv_sock_fd,SHUT_RDWR);	
+}
+
+
+void handle_connection(void *threadp)
+{
+	threadParams_t *threadsock = (threadParams_t*)threadp;
+	//Allocates buffer and initializes value to 0, same as malloc
+	char *buf_data=calloc(CHUNK_SIZE,sizeof(char));
+	if(buf_data==NULL)
+	{
+		syslog(LOG_ERR,"Error: malloc failed");
+		close_all();
+		exit(-1);
+	}
+	int loc=0;
+
+	//block the signals before recieving packets and sending back
+	int merr=sigprocmask(SIG_BLOCK, &(threadsock->mask),  NULL);
+	if(merr == -1)
+	{
+		perror("sigprocmask block error");
+		close_all();
+		exit(-1);
+	}
+	//Recieve the data and store in updated location always if available
+	while((len=recv(threadsock->client_socket , buf_data + loc , CHUNK_SIZE , 0))>0)
+	{
+		if(len == -1)
+		{
+			perror("recv error");
+			close_all();
+			exit(-1);
+		}
+		
+		if(strchr(buf_data ,'\n') != NULL)
+			break;
+		//Update the current location if newline not found
+		loc+=len;
+		
+		//if no new line character, need to add more memory and dynamically
+		//reallocate with an extra chunk
+		counter++;
+		buf_data=(char*)realloc(buf_data,((counter*CHUNK_SIZE)*sizeof(char)));
+		if(buf_data==NULL)
+		{
+			syslog(LOG_ERR,"Error: realloc failed");
+			close_all();
+			exit(-1);
+		}
+	}
+	
+	 // mutex lock
+    int rc=pthread_mutex_lock(&file_mutex);
+	if(rc !=0)
+    {
+		close_all();
+		exit(-1);
+	}	
+	//Write to file and position is updated
+	int werr = write(threadsock->fd,buf_data,strlen(buf_data));
+	if (werr == -1)
+	{
+		perror("write error");
+		close_all();
+		exit(-1);
+	}
+	
+	//Store last position of file
+	//int last_position = lseek(output_file_fd, 0, SEEK_CUR);
+	total_length += (strlen(buf_data));
+	//Place position ot beginnging
+	lseek(threadsock->fd, 0, SEEK_SET);
+	char * send_data_buf=calloc(total_length+timestamp_len,sizeof(char));
+	if(send_data_buf == NULL)
+	{
+		perror("calloc error");
+		close_all();
+		exit(-1);
+	}
+	
+	int rerr=read(threadsock->fd,send_data_buf,total_length+timestamp_len);
+	//syslog(LOG_DEBUG,"read length %d",total_length);
+	if (rerr == -1)
+	{
+		perror("read error");
+		close_all();
+		exit(-1);
+	}
+	
+	//syslog(LOG_DEBUG," data to send %s",send_data_buf);
+	//Send contents of buffer to client back
+	int serr=send(threadsock->client_socket,send_data_buf,total_length+timestamp_len, 0);
+	if(serr == -1)
 	{
 		close_all();
-		perror("close client socket error");
+		perror("send error");
+		exit(-1);
+	}
+	
+	rc=pthread_mutex_unlock(&file_mutex);
+	if(rc !=0)
+    {
+		close_all();
 		exit(-1);
 	}
 
-	//Close server socket fd
-	close_err=close(serv_sock_fd);
-	if(close_err == -1)
+	threadsock->thread_complete_success = true;
+	//Once complete, buffer cleared
+	free(buf_data);
+	free(send_data_buf);
+	
+	//Unblock the set of signals once complete
+	merr=sigprocmask(SIG_UNBLOCK, &(threadsock->mask), NULL);
+	if(merr == -1)
 	{
+		perror("sigprocmask unblock error");
 		close_all();
-		perror("close server socket error");
 		exit(-1);
 	}
 	
-	//Close regular file - output file fd
-	close_err=close(output_file_fd);
-	if(close_err == -1)
-	{
-		close_all();
-		perror("close output file error");
-		exit(-1);
-	}
-	//Once connection closed, logs status
-	syslog(LOG_DEBUG, "Closed connection from %s",IP_addr);
-	//After completing above procedure successfuly, exit logged
-	syslog(LOG_DEBUG,"Caught signal, exiting");
-	
-	//Close the syslog once all of logging is complete
-	closelog();
-	
-	//Delete and unlink the file
-	if(remove(TEST_FILE) == -1)
-	{
-		perror("file remove error");
-	}
+	close(threadsock->client_socket);
 }
+
 int main(int argc, char *argv[])
 {
 	//Opens a connection with facility as LOG_USER to Syslog.
@@ -134,8 +317,8 @@ int main(int argc, char *argv[])
 		exit (EXIT_FAILURE);
 	}
 	
-		//Adding only signals SIGINT and SIGTERM to an empty set to enable only them
-	sigset_t socket_set;
+	//Adding only signals SIGINT and SIGTERM to an empty set to enable only them
+	
 	int rc = sigemptyset(&socket_set);
 	if(rc !=0)
 	{
@@ -164,7 +347,6 @@ int main(int argc, char *argv[])
 	hints.ai_flags = AI_PASSIVE;
 	struct addrinfo *res;
 	
-	
 	//Node NULL and service set with port number as 9000, the pointer to
 	//linked list returned and stored in res
 	if (getaddrinfo(NULL, PORT , &hints, &res) != 0) 
@@ -173,8 +355,6 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
-
-    
     //Creating an end point for communication with type = SOCK_STREAM(connection oriented)
 	//and protocol =0 which allows to use appropriate protocol (TCP) here
 	serv_sock_fd=socket(res->ai_family,res->ai_socktype,res->ai_protocol);
@@ -183,7 +363,6 @@ int main(int argc, char *argv[])
 		perror("socket error");
 		exit(-1);
 	}
-	
 		
 	//Set options on socket to prevent binding errors from ocurring
 	int dummie =1;
@@ -241,7 +420,7 @@ int main(int argc, char *argv[])
 	}
 	
 	//If bind passes, open a new file to store the packet that will be read
-	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR,0644);
+	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND|O_SYNC,0644);
 	if(output_file_fd == -1)
 	{
 		perror("error opening file at /var/temp/aesdsocketdata");
@@ -258,6 +437,46 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 	freeaddrinfo(res);
+
+    thread_data td;
+    td.fd = output_file_fd;
+	struct sigevent sev;
+	int clock_id = CLOCK_MONOTONIC;
+    memset(&sev,0,sizeof(struct sigevent));
+	
+	//https://github.com/cu-ecen-aeld/aesd-lectures/blob/master/lecture9/timer_thread.c
+    sev.sigev_notify = SIGEV_THREAD;
+    sev.sigev_value.sival_ptr = &td;
+    sev.sigev_notify_function = timer_thread;
+    
+    struct itimerspec itimerspec;
+    struct timespec start_time;
+    
+    itimerspec.it_value.tv_sec = 10;
+    itimerspec.it_value.tv_nsec = 0;
+    itimerspec.it_interval.tv_sec = 10;
+    itimerspec.it_interval.tv_nsec = 0;
+    if ( timer_create(clock_id,&sev,&timerid) != 0 ) 
+    {
+        perror("error timer create");
+        close_all();
+        exit(-1);
+    }
+
+    if ( clock_gettime(clock_id,&start_time) != 0 ) 
+    {
+        perror("error clock_gettime");
+        close_all();
+        exit(-1);
+    } 
+
+    if( timer_settime(timerid, 0, &itimerspec, NULL ) != 0 ) 
+    {
+        perror("error timer_settime");
+        close_all();
+        exit(-1);
+    } 
+    
 	while(1)
 	{
 		
@@ -276,103 +495,21 @@ int main(int argc, char *argv[])
 		//Convert the binary to text before logging 
 		inet_ntop(AF_INET, get_in_addr((struct sockaddr *)&conn_addr), IP_addr, sizeof(IP_addr));
         syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);   
-			
-		//Allocates buffer and initializes value to 0, same as malloc
-		char *buf_data=calloc(CHUNK_SIZE,sizeof(char));
-		if(buf_data==NULL)
-		{
-			syslog(LOG_ERR,"Error: malloc failed");
-			close_all();
-			exit(-1);
-		}
-		int loc=0;
-
-		//block the signals before recieving packets and sending back
-		int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
-		if(merr == -1)
-		{
-			perror("sigprocmask block error");
-			close_all();
-			exit(-1);
-		}
-		//Recieve the data and store in updated location always if available
-		while((len=recv(client_sock_fd , buf_data + loc , CHUNK_SIZE , 0))>0)
-		{
-			if(len == -1)
-			{
-				perror("recv error");
-				close_all();
-				exit(-1);
-			}
-			
-			if(strchr(buf_data ,'\n') != NULL)
-				break;
-			//Update the current location if newline not found
-			loc+=len;
-			
-			//if no new line character, need to add more memory and dynamically
-			//reallocate with an extra chunk
-			counter++;
-			buf_data=(char*)realloc(buf_data,((counter*CHUNK_SIZE)*sizeof(char)));
-			if(buf_data==NULL)
-			{
-				syslog(LOG_ERR,"Error: realloc failed");
-				close_all();
-				exit(-1);
-			}
-		}
-
-			
-		//Write to file and position is updated
-		int werr = write(output_file_fd,buf_data,strlen(buf_data));
-		if (werr == -1)
-		{
-			perror("write error");
-			close_all();
-			exit(-1);
-		}
 		
-
+		//Singely linked list to manage thread parameters
+		slist_ptr = (slist_data_t*)malloc(sizeof(slist_data_t));
+		SLIST_INSERT_HEAD(&head,slist_ptr,entries);
+		slist_ptr->threadParams.mask = socket_set;
+		slist_ptr->threadParams.client_socket = client_sock_fd;
+		slist_ptr->threadParams.fd=output_file_fd;
+		slist_ptr->threadParams.thread_complete_success = false;
 		
-		//Store last position of file
-		//int last_position = lseek(output_file_fd, 0, SEEK_CUR);
-		total_length += (strlen(buf_data));
-		//Place position ot beginnging
-		lseek(output_file_fd, 0, SEEK_SET);
-		char * send_data_buf=calloc(total_length,sizeof(char));
+		pthread_create(&(slist_ptr->threadParams.threads),NULL,(void*)&handle_connection,(void*)&(slist_ptr->threadParams));
 		
-		
-		int rerr=read(output_file_fd,send_data_buf,total_length);
-		syslog(LOG_DEBUG,"%d",total_length);
-		if (rerr == -1)
-		{
-			perror("read error");
-			close_all();
-			exit(-1);
-		}
-		
-		syslog(LOG_DEBUG,"%s",send_data_buf);
-		//Send contents of buffer to client back
-		int serr=send(client_sock_fd,send_data_buf,total_length, 0);
-		if(serr == -1)
-		{
-			close_all();
-			perror("send error");
-			exit(-1);
-		}
-
-		//Once complete, buffer cleared
-		free(buf_data);
-		free(send_data_buf);
-		
-		//Unblock the set of signals once complete
-		merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
-		if(merr == -1)
-		{
-			perror("sigprocmask unblock error");
-			close_all();
-			exit(-1);
-		}
-    }
+		SLIST_FOREACH(slist_ptr,&head,entries)
+		{    
+				pthread_join(slist_ptr->threadParams.threads,NULL);
+        }
+	}
 	return 0;
 }	
