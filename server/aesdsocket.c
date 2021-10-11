@@ -63,15 +63,10 @@ SLIST_HEAD(slisthead,slist_data_s) head;
 
 
 pthread_mutex_t mutex_test;
-
-pid_t check;
+//pid_t check;
 timer_t timerid;
 int serv_sock_fd,client_sock_fd,counter =1,output_file_fd,finish;
-
-struct addrinfo host;
-struct addrinfo *servinfo;
-
-struct sockaddr_in con_addr;
+struct sockaddr_in conn_addr;
 
 
 typedef struct sigsev_data{
@@ -163,7 +158,7 @@ void close_all(){
 }
 
 
-static void sig_handler(int signo){
+static void signal_handler(int signo){
 
 
     if(signo == SIGINT || signo==SIGTERM) {
@@ -257,7 +252,7 @@ void* handle_connection(void *threadp)
     int extra=0;
     char single_byte;
     int outbuf_size = CHUNK_SIZE;
-	ssize_t rbytes; 
+	ssize_t rerr; 
     if (sigprocmask(SIG_BLOCK,&(thread_handle_sock->mask),NULL) == -1)
     {
         perror("sigprocmask signal block");
@@ -274,9 +269,48 @@ void* handle_connection(void *threadp)
     }
 
     thread_handle_sock->send_data_buf = calloc(CHUNK_SIZE,sizeof(char));
-    while((rbytes = read(thread_handle_sock->fd,&single_byte,1)) > 0){
+    
+    /*while((rerr = read(thread_handle_sock->fd,&thread_handle_sock->send_data_buf+start,CHUNK_SIZE)) > 0)
+    {
+		if(rerr <0 ) {
 
-        if(rbytes <0 ) {
+             perror("read error");
+             close_all();
+             exit(-1);
+
+        }
+        extra += rerr;
+        //thread_handle_sock->send_data_buf[start] = single_byte;
+        if(strchr(thread_handle_sock->send_data_buf ,'\n') == NULL)
+        { 
+			break;
+			 
+            
+           
+        }
+
+        start+=CHUNK_SIZE;
+
+        if(start >= outbuf_size){
+            
+            outbuf_size += CHUNK_SIZE;
+            buffer2=realloc(thread_handle_sock->send_data_buf,sizeof(char)*outbuf_size);
+            thread_handle_sock->send_data_buf=buffer2;
+
+        }
+				
+	}
+	if (send(thread_handle_sock->client_socket,thread_handle_sock->send_data_buf,extra, 0) == -1)
+	{ 
+		perror("error send");
+		close_all();
+		//exit(-1);
+	}
+		*/
+    
+    while((rerr = read(thread_handle_sock->fd,&single_byte,1)) > 0){
+
+        if(rerr <0 ) {
 
              perror("read error");
              close_all();
@@ -332,92 +366,98 @@ void* handle_connection(void *threadp)
 int main(int argc, char* argv[])
 {
 
-    if (pthread_mutex_init(&mutex_test,NULL) != 0)
-    {
-        perror("dynamic mutex init error");
-        close_all();
-        exit(-1);
-    } 
+	//Opens a connection with facility as LOG_USER to Syslog.
+	openlog("aesdsocket",0,LOG_USER);
+    
 
     SLIST_INIT(&head);
 
-    socklen_t len;
+    //With node as null and ai_flags as AI_PASSIVE, the socket address 
+	//will be suitable for binding a socket that will accept connections
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+	struct addrinfo *res;
+	
+	//Node NULL and service set with port number as 9000, the pointer to
+	//linked list returned and stored in res
+	if (getaddrinfo(NULL, PORT , &hints, &res) != 0) 
+	{
+		perror("getaddrinfo error");
+		exit(-1);
+	}
 
-    memset(&host, 0, sizeof(host)); 
-
-    host.ai_family = AF_UNSPEC;     
-    host.ai_socktype = SOCK_STREAM; 
-    host.ai_flags = AI_PASSIVE;     
-
-    openlog("AESDSOCKET :",LOG_PID,LOG_USER);
-
-    check = getaddrinfo(NULL, PORT, &host, &servinfo);
-
-    if (check != 0){
-       perror("getaddrinfor error");
-        close_all();
-        exit(-1);
+    //Creating an end point for communication with type = SOCK_STREAM(connection oriented)
+	//and protocol =0 which allows to use appropriate protocol (TCP) here
+	serv_sock_fd=socket(res->ai_family,res->ai_socktype,res->ai_protocol);
+	if(serv_sock_fd==-1)
+	{
+		perror("socket error");
+		exit(-1);
+	}
+		
+	//Set options on socket to prevent binding errors from ocurring
+	int dummie =1;
+	if (setsockopt(serv_sock_fd, SOL_SOCKET, SO_REUSEADDR, &dummie, sizeof(int)) == -1) 
+	{	
+		
+		perror("setsockopt error");
     }
-
-    serv_sock_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-
-    if(serv_sock_fd == -1) {
-        perror("socket error");
-        close_all();
-        exit(-1);
-    }
-
-    int reuse_addr = 1;
-
-    if (setsockopt(serv_sock_fd, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(int)) <0) 
-    {
-        syslog(LOG_ERR, "reuse socket error");
-        close(serv_sock_fd);
-        close_all();
-        exit(-1);
-    } 
-
-
-    check = bind(serv_sock_fd,servinfo->ai_addr, servinfo->ai_addrlen);
-
-    if (check == -1)
-    {
-        perror("bind error");
-        freeaddrinfo(servinfo);
-        close_all();
-        exit(-1);
-    }
-
-        
+    
+	//Assign address to the socket created
+	int rc=bind(serv_sock_fd, res->ai_addr, res->ai_addrlen);
+	if(rc==-1)
+	{
+		perror("bind error");
+		exit(-1);
+	}
   
-    freeaddrinfo(servinfo);
+    freeaddrinfo(res);
 
- 
-    if(signal(SIGINT,sig_handler) == SIG_ERR)
-    {
-        syslog(LOG_ERR,"sigint error");
-        close_all();
-        exit(-1);
-    }
-    
-    
-    if(signal(SIGTERM,sig_handler) == SIG_ERR){
-        syslog(LOG_ERR,"sigterm error");
-        close_all();
-        exit(-1);
-    }
+	//Registering signal_handler as the handler for the signals SIGTERM 
+	//and SIGINT
+	//Reference: Ch 10 signals, Textbook: Linux System Programming
+	sigset_t socket_set;
+	if (signal(SIGINT, signal_handler) == SIG_ERR) 
+	{
+		fprintf (stderr, "Cannot handle SIGINT\n");
+		exit (EXIT_FAILURE);
+	}
+	
+	if (signal(SIGTERM, signal_handler) == SIG_ERR) 
+	{
+		fprintf (stderr, "Cannot handle SIGTERM\n");
+		exit (EXIT_FAILURE);
+	}
 
   
-    sigset_t set;
-    sigemptyset(&set);          
+
+	//Adding only signals SIGINT and SIGTERM to an empty set to enable only them
+	
+	rc = sigemptyset(&socket_set);
+	if(rc !=0)
+	{
+		perror("signal empty set error");
+		exit(-1);
+	}
+	rc = sigaddset(&socket_set,SIGINT);
+	if(rc !=0)
+	{
+		perror("error adding signal SIGINT to set");
+		exit(-1);
+	}
+	rc = sigaddset(&socket_set,SIGTERM);
+	if(rc !=0)
+	{
+		perror("error adding signal SIGTERM to set");
+		exit(-1);
+	}  
 
     
-    sigaddset(&set,SIGINT);      
-    sigaddset(&set,SIGTERM);     
-
     
-    
-    check = listen(serv_sock_fd, BACKLOG);
+    pid_t check = listen(serv_sock_fd, BACKLOG);
 
     if (check == -1){
 
@@ -434,6 +474,14 @@ int main(int argc, char* argv[])
         exit(-1);
     }
     
+	//Initialise mutex
+    if (pthread_mutex_init(&mutex_test,NULL) != 0)
+    {
+        perror("dynamic mutex init error");
+        close_all();
+        exit(-1);
+    } 
+
     
     if (argc == 2){
 
@@ -498,10 +546,10 @@ int main(int argc, char* argv[])
     while(!finish) {
 
 
-    len = sizeof(con_addr);
+    socklen_t len = sizeof(conn_addr);
 
    
-    client_sock_fd = accept(serv_sock_fd,(struct sockaddr *)&con_addr,&len);
+    client_sock_fd = accept(serv_sock_fd,(struct sockaddr *)&conn_addr,&len);
 
     if(finish) break;
 
@@ -509,7 +557,7 @@ int main(int argc, char* argv[])
         perror("client error");
     }
 
-    char *ip_string = inet_ntoa(con_addr.sin_addr);
+    char *ip_string = inet_ntoa(conn_addr.sin_addr);
     
     syslog(LOG_DEBUG,"Accepted connection from %s",ip_string);
     
@@ -518,14 +566,14 @@ int main(int argc, char* argv[])
     slist_ptr->threadParams.client_socket = client_sock_fd;
     slist_ptr->threadParams.thread_complete = false;
     slist_ptr->threadParams.fd=output_file_fd;
-    slist_ptr->threadParams.mask = set;
+    slist_ptr->threadParams.mask = socket_set;
     slist_ptr->threadParams.lock = &mutex_test;
     
 
     
     if (pthread_create(&(slist_ptr->threadParams.threads),(void*)0,&handle_connection,(void*)&(slist_ptr->threadParams)) != 0){
 
-        perror("Error creating thread:");
+        perror("pthread error");
         close_all();
         exit(-1);
     }
