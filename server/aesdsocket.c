@@ -31,7 +31,7 @@
 #include <errno.h>
 #include "queue.h"
 #include <stdbool.h>
-
+#include <sys/time.h>
 
 #define PORT "9000"
 #define BACKLOG 10
@@ -123,70 +123,91 @@ void close_all()
         free(slist_ptr);
     }
 	
-    if(timer_delete(timerid) == -1)
-    {
-		perror("timer delete error");
-	}
+    //if(timer_delete(timerid) == -1)
+    //{
+	//	perror("timer delete error");
+	//}
 	
 	pthread_mutex_destroy(&file_mutex);
     // close log
     closelog();
 
 }
-
-static void timer_thread(union sigval sigval)
+void timer_handler(int signo)
 {
-	
-    
-	struct thread_data *td = (struct thread_data*) sigval.sival_ptr;
-    char time_string[100];
+	char time_buffer[100];
+	time_t current_time;
+        struct tm *timer_info;
+        time(&current_time);
+        timer_info = localtime(&current_time);
 
-    time_t rtime;
-	time(&rtime);
-	struct tm *info=localtime(&rtime);
-	 
-    size_t size= strftime(time_string,100,"timestamp:%a, %d %b %Y %T %z\n",info);
+        int timer_buffer_size = strftime(time_buffer,100,"timestamp:%a, %d %b %Y %T %z\n",timer_info);
+timestamp_len=timer_buffer_size;
+        pthread_mutex_lock(&file_mutex);
 
-    //int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
-	//if(merr == -1)
-	//{
-	//	perror("sigprocmask unblock error");
-	//	close_all();
-//		exit(-1);
-	//}
-	timestamp_len=size;
-	
-	int rc=pthread_mutex_lock(&file_mutex);
-	if(rc !=0)
-	{
-		close_all();
-		exit(-1);
-	}
-    // Write to file
-    int wbytes = write(td->fd,time_string,size);
-    if (wbytes == -1){
-        perror("write error");
+        //write to file
+        int timer_writebytes = write(output_file_fd,time_buffer,timer_buffer_size);
+        if(timer_writebytes == -1){
+        printf("Error in writing time to file\n");
         close_all();
         exit(-1);
-    }
+        }
+
+        pthread_mutex_unlock(&file_mutex);
+}
+//static void timer_thread(union sigval sigval)
+//{
+	
     
-    rc=pthread_mutex_unlock(&file_mutex);
-    if(rc !=0)
-    {
-		close_all();
-		exit(-1);
-	}
-	//merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
-	//if(merr == -1)
+	//struct thread_data *td = (struct thread_data*) sigval.sival_ptr;
+    //char time_string[100];
+
+    //time_t rtime;
+	//time(&rtime);
+	//struct tm *info=localtime(&rtime);
+	 
+    //size_t size= strftime(time_string,100,"timestamp:%a, %d %b %Y %T %z\n",info);
+
+    ////int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
+	////if(merr == -1)
+	////{
+	////	perror("sigprocmask unblock error");
+	////	close_all();
+////		exit(-1);
+	////}
+	//timestamp_len=size;
+	
+	//int rc=pthread_mutex_lock(&file_mutex);
+	//if(rc !=0)
 	//{
-	//	perror("sigprocmask unblock error");
-	//	close_all();
-	//	exit(-1);
+		//close_all();
+		//exit(-1);
 	//}
+    //// Write to file
+    //int wbytes = write(td->fd,time_string,size);
+    //if (wbytes == -1){
+        //perror("write error");
+        //close_all();
+        //exit(-1);
+    //}
+    
+    //rc=pthread_mutex_unlock(&file_mutex);
+    //if(rc !=0)
+    //{
+		//close_all();
+		//exit(-1);
+	//}
+	////merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
+	////if(merr == -1)
+	////{
+	////	perror("sigprocmask unblock error");
+	////	close_all();
+	////	exit(-1);
+	////}
 	
 	
 
-}
+//}
 
 //Below function referenced from https://beej.us/guide/bgnet/html/
 void *get_in_addr(struct sockaddr *sa)
@@ -475,48 +496,60 @@ int main(int argc, char *argv[])
 	freeaddrinfo(res);
 
 	pthread_mutex_init( &file_mutex, NULL);
-    thread_data td;
-    td.fd = output_file_fd;
-	struct sigevent sev;
-	int clock_id = CLOCK_MONOTONIC;
-    memset(&sev,0,sizeof(struct sigevent));
+	signal(SIGALRM, timer_handler);
+    	struct itimerval timer;
+   	timer.it_value.tv_sec = 10;
+    	timer.it_value.tv_usec = 0;
+    	timer.it_interval.tv_sec = 10;
+    	timer.it_interval.tv_usec = 0;
+    	if (setitimer (ITIMER_REAL, &timer, NULL) != 0)
+    	{
+        	printf("error in setting time\n");
+        	close_all();
+      
+    	}
+    //thread_data td;
+    //td.fd = output_file_fd;
+	//struct sigevent sev;
+	//int clock_id = CLOCK_MONOTONIC;
+    //memset(&sev,0,sizeof(struct sigevent));
 	
-	//https://github.com/cu-ecen-aeld/aesd-lectures/blob/master/lecture9/timer_thread.c
-    sev.sigev_notify = SIGEV_THREAD;
-    sev.sigev_value.sival_ptr = &td;
-    sev.sigev_notify_function = timer_thread;
+	////https://github.com/cu-ecen-aeld/aesd-lectures/blob/master/lecture9/timer_thread.c
+    //sev.sigev_notify = SIGEV_THREAD;
+    //sev.sigev_value.sival_ptr = &td;
+    //sev.sigev_notify_function = timer_thread;
     
-    struct itimerspec itimerspec;
-    struct timespec start_time;
+    //struct itimerspec itimerspec;
+    //struct timespec start_time;
     
-    //itimerspec.it_value.tv_sec = 10;
-    //itimerspec.it_value.tv_nsec = 0;
-    itimerspec.it_interval.tv_sec = 10;
-    itimerspec.it_interval.tv_nsec = 0;
+    ////itimerspec.it_value.tv_sec = 10;
+    ////itimerspec.it_value.tv_nsec = 0;
+    //itimerspec.it_interval.tv_sec = 10;
+    //itimerspec.it_interval.tv_nsec = 0;
     
     
-    if ( timer_create(clock_id,&sev,&timerid) != 0 ) 
-    {
-        perror("error timer create");
-        close_all();
-        exit(-1);
-    }
+    //if ( timer_create(clock_id,&sev,&timerid) != 0 ) 
+    //{
+        //perror("error timer create");
+        //close_all();
+        //exit(-1);
+    //}
 
-    if ( clock_gettime(clock_id,&start_time) != 0 ) 
-    {
-        perror("error clock_gettime");
-        close_all();
-        exit(-1);
-    } 
+    //if ( clock_gettime(clock_id,&start_time) != 0 ) 
+    //{
+        //perror("error clock_gettime");
+        //close_all();
+        //exit(-1);
+    //} 
 	
-	timespec_add(&itimerspec.it_value,&start_time,&itimerspec.it_interval);
+	//timespec_add(&itimerspec.it_value,&start_time,&itimerspec.it_interval);
 	
-    if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 )
-    {
-        perror("error timer_settime");
-        close_all();
-        exit(-1);
-    } 
+    //if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 )
+    //{
+        //perror("error timer_settime");
+        //close_all();
+        //exit(-1);
+    //} 
     
 	while(1)
 	{
