@@ -189,10 +189,12 @@ void *get_in_addr(struct sockaddr *sa)
 //Signal handler for Signals SIGTERM and SIGINT
 static void signal_handler(int signo)
 {
+	if(signo == SIGINT || signo==SIGTERM) {
 	//thread safe disabling of both reading and writing
 	shutdown(serv_sock_fd,SHUT_RDWR);
 	//Delete and unlink the file
 	remove(TEST_FILE);
+}
 }
 
 
@@ -535,7 +537,14 @@ int main(int argc, char *argv[])
 		
 		SLIST_FOREACH(slist_ptr,&head,entries)
 		{    
+			//if (slist_ptr->threadParams.completion_status == true)
+			//{
+			
 				pthread_join(slist_ptr->threadParams.threads,NULL);
+			
+			//	SLIST_REMOVE(&head,slist_ptr,slist_data_s,entries);
+			//	free(slist_ptr);
+			//}
         }
 	}
 	return 0;
