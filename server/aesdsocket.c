@@ -457,24 +457,23 @@ int main(int argc, char* argv[])
 
     
     
-    pid_t check = listen(serv_sock_fd, BACKLOG);
+	//Post binding, the server is running on the port 9000, so now
+	//remote connections (client) can listen to server
+	//Backlog - queue of incoming connections before being accepted to send/recv 
+	//backlog set as 4, can be reduced to a lower number since we get only 1 connection
+	if(listen(serv_sock_fd,BACKLOG)==-1)
+	{
+		perror("error listening");
+		exit(-1);
+	}
 
-    if (check == -1){
-
-        perror("\nERROR listen():");
-        close_all();
-        exit(-1);
-
-    }
-
-    output_file_fd =  open("/var/tmp/aesdsocketdata",O_RDWR|O_CREAT|O_APPEND,S_IRWXU);
-    if(output_file_fd<0){
-        perror("\nERROR open():");
-        close_all();
-        exit(-1);
-    }
+	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
+	if(output_file_fd == -1)
+	{
+		perror("error opening file at /var/temp/aesdsocketdata");
+		exit(-1);
+	}
     
-	//Initialise mutex
     if (pthread_mutex_init(&mutex_test,NULL) != 0)
     {
         perror("dynamic mutex init error");
@@ -482,42 +481,50 @@ int main(int argc, char* argv[])
         exit(-1);
     } 
 
-    
-    if (argc == 2){
+    //Below conditional check referenced from https://stackoverflow.com/questions/803776/help-comparing-an-argv-string
+	if(argc==2 && (!strcmp(argv[1], "-d")))
+	{
+		//Below code reference from chapter 5 of textbook reference
+		//Child forked to create a daemon custom named customd
+		pid_t customd;
+		customd = fork();
+		if (customd == -1)
+		{
+			perror("fork error");
+			exit(-1);
+		}
+		else if (customd != 0 )
+		{
+			//Exit parent, to make child get reparented to init_parent
+			exit (EXIT_SUCCESS);
+		}
 
-        if (!strcmp("-d",argv[1])){
+		//Create new session and process group
+		if(setsid() == -1) 
+		{
+			perror("setsid");
+			exit(-1);
+		}
+		
 
-        check = fork();
-        if (check == -1){
+		//Set working to root directory
+		if (chdir("/") == -1)
+		{
+			exit(-1);
+		}
+		
+		//Should close if any open files, skipping that helre
+		//Redirect Stdin,stdout,stderr to /dev/null
+		open ("/dev/null", O_RDWR); 
+		dup (0); 
+		dup (0); 
+	}
 
-            perror("fork error");
-            close_all();
-            exit(-1);
-        }
-
-        if (check != 0){
-            exit(0);
-        }
-
-        setsid();
-
-        chdir("/");
-
-        open("/dev/null", O_RDWR);
-		dup(0);
-		dup(0);
-
-    }
-
-    }
-
+	//Below timer reference : https://github.com/cu-ecen-aeld/aesd-lectures/blob/master/lecture9/timer_thread.c
     struct sigevent sev;
-
     sigsev_data td;
     td.fd = output_file_fd;
-
     memset(&sev,0,sizeof(struct sigevent));
-
     sev.sigev_notify = SIGEV_THREAD;
     sev.sigev_value.sival_ptr = &td;
     sev.sigev_notify_function = timer_handle;
@@ -531,10 +538,12 @@ int main(int argc, char* argv[])
     } 
 
     struct itimerspec itimerspec;
+    itimerspec.it_value.tv_sec = 10;
+    itimerspec.it_value.tv_nsec = 0;
     itimerspec.it_interval.tv_sec = 10;
     itimerspec.it_interval.tv_nsec = 0;
 
-    timespec_add(&itimerspec.it_value,&start_time,&itimerspec.it_interval);
+    //timespec_add(&itimerspec.it_value,&start_time,&itimerspec.it_interval);
     
     
     if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) {
