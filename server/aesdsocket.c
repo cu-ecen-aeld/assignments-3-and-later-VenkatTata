@@ -148,13 +148,13 @@ void timer_handler(int signo)
 	pthread_mutex_lock(&file_mutex);
 
 	//write to file
-	int timer_writebytes = write(output_file_fd,time_buffer,timer_buffer_size);
-	if(timer_writebytes == -1)
-	{
-		printf("Error in writing time to file\n");
-		close_all();
-		exit(-1);
-		}
+	//int timer_writebytes = write(output_file_fd,time_buffer,timer_buffer_size);
+	//if(timer_writebytes == -1)
+	//{
+	//	printf("Error in writing time to file\n");
+	//	close_all();
+	//	exit(-1);
+	//	}
 
 	pthread_mutex_unlock(&file_mutex);
 }
