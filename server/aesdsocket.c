@@ -50,6 +50,7 @@ typedef struct{
     int client_socket;
     sigset_t mask;
     bool thread_complete_success;
+    pthread_mutex_t *mutex;
 }threadParams_t;
 
 static inline void timespec_add( struct timespec *result,
@@ -73,7 +74,8 @@ struct slist_data_s{
 slist_data_t *slist_ptr = NULL;
 SLIST_HEAD(slisthead,slist_data_s) head;
 
-pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t file_mutex;
+
 
 typedef struct thread_data
 {
@@ -114,7 +116,7 @@ void close_all()
 		perror("timer delete error");
 	}
 	
-	
+	pthread_mutex_destroy(&file_mutex);
     // close log
     closelog();
 
@@ -142,12 +144,12 @@ static void timer_thread(union sigval sigval)
 	//}
 	timestamp_len=size;
 	
-	//int rc=pthread_mutex_lock(&file_mutex);
-	//if(rc !=0)
-	//{
-	//	close_all();
-	//	exit(-1);
-	//}
+	int rc=pthread_mutex_lock(&file_mutex);
+	if(rc !=0)
+	{
+		close_all();
+		exit(-1);
+	}
     // Write to file
     int wbytes = write(td->fd,time_string,size);
     if (wbytes == -1){
@@ -156,12 +158,12 @@ static void timer_thread(union sigval sigval)
         exit(-1);
     }
     
-    //rc=pthread_mutex_unlock(&file_mutex);
-    //if(rc !=0)
-    //{
-	//	close_all();
-	//	exit(-1);
-	//}
+    rc=pthread_mutex_unlock(&file_mutex);
+    if(rc !=0)
+    {
+		close_all();
+		exit(-1);
+	}
 	//merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
 	//if(merr == -1)
 	//{
@@ -243,7 +245,7 @@ void handle_connection(void *threadp)
 	}
 	
 	 // mutex lock
-    int rc=pthread_mutex_lock(&file_mutex);
+    int rc=pthread_mutex_lock(threadsock->mutex);
 	if(rc !=0)
     {
 		close_all();
@@ -290,7 +292,7 @@ void handle_connection(void *threadp)
 	}
 
 	
-	rc=pthread_mutex_unlock(&file_mutex);
+	rc=pthread_mutex_unlock(threadsock->mutex);
 	if(rc !=0)
     {
 		close_all();
@@ -458,6 +460,7 @@ int main(int argc, char *argv[])
 	}
 	freeaddrinfo(res);
 
+	pthread_mutex_init( &file_mutex, NULL);
     thread_data td;
     td.fd = output_file_fd;
 	struct sigevent sev;
@@ -476,6 +479,8 @@ int main(int argc, char *argv[])
     //itimerspec.it_value.tv_nsec = 0;
     itimerspec.it_interval.tv_sec = 10;
     itimerspec.it_interval.tv_nsec = 0;
+    
+    
     if ( timer_create(clock_id,&sev,&timerid) != 0 ) 
     {
         perror("error timer create");
@@ -525,7 +530,7 @@ int main(int argc, char *argv[])
 		slist_ptr->threadParams.client_socket = client_sock_fd;
 		slist_ptr->threadParams.fd=output_file_fd;
 		slist_ptr->threadParams.thread_complete_success = false;
-		
+		slist_ptr->threadParams.mutex=&file_mutex;
 		pthread_create(&(slist_ptr->threadParams.threads),NULL,(void*)&handle_connection,(void*)&(slist_ptr->threadParams));
 		
 		SLIST_FOREACH(slist_ptr,&head,entries)
