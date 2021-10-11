@@ -252,6 +252,13 @@ void handle_connection(void *threadp)
 		exit(-1);
 	}
 	int loc=0;
+		 // mutex lock
+    int rc=pthread_mutex_lock(threadsock->mutex);
+	if(rc !=0)
+    {
+		close_all();
+		exit(-1);
+	}	
 
 	//block the signals before recieving packets and sending back
 	int merr=sigprocmask(SIG_BLOCK, &(threadsock->mask),  NULL);
@@ -288,13 +295,7 @@ void handle_connection(void *threadp)
 		}
 	}
 	
-	 // mutex lock
-    int rc=pthread_mutex_lock(threadsock->mutex);
-	if(rc !=0)
-    {
-		close_all();
-		exit(-1);
-	}	
+
 	//Write to file and position is updated
 	int werr = write(threadsock->fd,threadsock->buf_data,strlen(threadsock->buf_data));
 	if (werr == -1)
@@ -485,13 +486,7 @@ int main(int argc, char *argv[])
 		dup (0); 
 	}
 	
-	//If bind passes, open a new file to store the packet that will be read
-	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
-	if(output_file_fd == -1)
-	{
-		perror("error opening file at /var/temp/aesdsocketdata");
-		exit(-1);
-	}
+
 	
 	//Post binding, the server is running on the port 9000, so now
 	//remote connections (client) can listen to server
@@ -563,7 +558,13 @@ int main(int argc, char *argv[])
         //close_all();
         //exit(-1);
     //} 
-    
+    //If bind passes, open a new file to store the packet that will be read
+	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
+	if(output_file_fd == -1)
+	{
+		perror("error opening file at /var/temp/aesdsocketdata");
+		exit(-1);
+	}
 	while(!stop)
 	{
 		
