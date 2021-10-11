@@ -122,20 +122,16 @@ void close_all()
 
 static void timer_thread(union sigval sigval)
 {
-	int rc=pthread_mutex_lock(&file_mutex);
-	if(rc !=0)
-	{
-		close_all();
-		exit(-1);
-	}
+	
     
 	struct thread_data *td = (struct thread_data*) sigval.sival_ptr;
     char time_string[45];
 
     time_t rtime;
 	time(&rtime);
+	struct tm *info=localtime(&rtime);
 	 
-    size_t size= strftime(time_string,100,"timestamp:%a, %d %b %Y %T %z\n",localtime(&rtime));
+    size_t size= strftime(time_string,100,"timestamp:%a, %d %b %Y %T %z\n",info);
 
     //int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
 	//if(merr == -1)
@@ -145,7 +141,13 @@ static void timer_thread(union sigval sigval)
 //		exit(-1);
 	//}
 	timestamp_len=size;
-
+	
+	int rc=pthread_mutex_lock(&file_mutex);
+	if(rc !=0)
+	{
+		close_all();
+		exit(-1);
+	}
     // Write to file
     int wbytes = write(td->fd,time_string,size);
     if (wbytes == -1){
