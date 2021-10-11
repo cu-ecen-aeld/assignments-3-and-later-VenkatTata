@@ -51,6 +51,7 @@ typedef struct{
     sigset_t mask;
     bool thread_complete_success;
     pthread_mutex_t *mutex;
+    
 }threadParams_t;
 
 static inline void timespec_add( struct timespec *result,
@@ -97,12 +98,23 @@ void close_all()
 	//After completing above procedure successfuly, exit logged
 	syslog(LOG_DEBUG,"Caught signal, exiting");
 	
-	//Close the syslog once all of logging is complete
-	closelog();
+	
 	
 	//Delete and unlink the file
 	remove(TEST_FILE);
 	
+	SLIST_FOREACH(slist_ptr,&head,entries){
+
+        if (slist_ptr->threadParams.thread_complete_success != true){
+
+            pthread_cancel(slist_ptr->threadParams.threads);
+         
+            
+        }
+
+
+    }
+    
     // free Linked list
     while(!SLIST_EMPTY(&head))
     {
@@ -127,7 +139,7 @@ static void timer_thread(union sigval sigval)
 	
     
 	struct thread_data *td = (struct thread_data*) sigval.sival_ptr;
-    char time_string[45];
+    char time_string[100];
 
     time_t rtime;
 	time(&rtime);
