@@ -37,6 +37,9 @@
 #define BACKLOG 10
 #define CHUNK_SIZE 500
 #define TEST_FILE  "/var/tmp/aesdsocketdata"
+
+
+int stop=0;
 int timestamp_len=0;
 int serv_sock_fd,client_sock_fd,output_file_fd, total_length,len,capacity,counter=1,close_err;
 struct sockaddr_in conn_addr;
@@ -84,6 +87,7 @@ typedef struct thread_data
     int fd;
     
 }thread_data;
+
 
 
 //Function handles all open files when there is an error
@@ -147,14 +151,14 @@ void timer_handler(int signo)
 	timestamp_len=timer_buffer_size;
 	pthread_mutex_lock(&file_mutex);
 
-	//write to file
-	//int timer_writebytes = write(output_file_fd,time_buffer,timer_buffer_size);
-	//if(timer_writebytes == -1)
-	//{
-	//	printf("Error in writing time to file\n");
-	//	close_all();
-	//	exit(-1);
-	//	}
+	
+	int test = write(output_file_fd,time_buffer,timer_buffer_size);
+	if(test == -1)
+	{
+		
+		close_all();
+		exit(-1);
+		}
 
 	pthread_mutex_unlock(&file_mutex);
 }
@@ -230,7 +234,8 @@ static void signal_handler(int signo)
 		//thread safe disabling of both reading and writing
 		shutdown(serv_sock_fd,SHUT_RDWR);
 		//Delete and unlink the file
-		remove(TEST_FILE);
+		//remove(TEST_FILE);
+		stop=1;
 	}
 }
 
@@ -559,7 +564,7 @@ int main(int argc, char *argv[])
         //exit(-1);
     //} 
     
-	while(1)
+	while(!stop)
 	{
 		
 		socklen_t conn_addr_len=sizeof(conn_addr);
