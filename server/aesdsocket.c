@@ -12,23 +12,27 @@
  *		https://beej.us/guide/bgnet/html/
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <netdb.h>
-#include <errno.h>
-#include <signal.h>
 #include <syslog.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <fcntl.h>
+#include <sys/wait.h>
+#include <string.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
-#include <stdbool.h>
-#include <pthread.h>
+#include <getopt.h>
 #include <time.h>
+#include <pthread.h>	
+#include <errno.h>
 #include "queue.h"
+#include <stdbool.h>
+#include <sys/time.h>
 
 #define PORT "9000"
 #define CHUNK_SIZE 500
@@ -40,7 +44,7 @@ char IP_addr[INET6_ADDRSTRLEN];
 pthread_mutex_t mutex_test;
 timer_t timerid;
 int serv_sock_fd,client_sock_fd,counter =1,output_file_fd;
-//int finish;
+int finish;
 struct sockaddr_in conn_addr;
 
 void *get_in_addr(struct sockaddr *sa)
@@ -82,13 +86,22 @@ SLIST_HEAD(slisthead,slist_data_s) head;
 
 void close_all(){
 
-    //finish = 1;
-    close(serv_sock_fd);
-    close(output_file_fd);
-
-    if(remove(TEST_FILE) != 0){
-        syslog(LOG_ERR,"error remove");
+     finish = 1;
+	//Functions called due to an error, hence close files errno not 
+	//checked in this function
+	//All close errors handled in signal handler when no error occured
+	close(serv_sock_fd);
+	//Close regular file - output file fd
+	close(output_file_fd);
+	//Delete and unlink the file
+    if(remove(TEST_FILE) != 0)
+    {
+        perror("file remove error");
     }
+    
+    //After completing above procedure successfuly, exit logged
+	syslog(LOG_DEBUG,"Caught signal, exiting");
+	
     
     SLIST_FOREACH(slist_ptr,&head,entries){
 
@@ -104,8 +117,13 @@ void close_all(){
         SLIST_REMOVE_HEAD(&head,entries);
         free(slist_ptr);
     }
-    pthread_mutex_destroy(&mutex_test);           
-    timer_delete(timerid);                                
+    //Destroy mutex created
+    pthread_mutex_destroy(&mutex_test); 
+    
+    //Delete timer created for 10 seconds          
+    timer_delete(timerid);               
+    
+    //close the logging for aesdsocket                              
     closelog();
 }
 
@@ -132,7 +150,7 @@ static void timer_handle(union sigval sigval){
 
     int time_length= strftime(timer_buffer,100,"timestamp:%a, %d %b %Y %T %z\n",info);
 
-    if (pthread_mutex_lock(&mutex_test) != 0)
+    if (pthread_mutex_lock(&mutex_test) == -1)
     {
         perror("error pthread mutex lock");
         close_all();
@@ -146,7 +164,7 @@ static void timer_handle(union sigval sigval){
         exit(-1);
     }
 
-    if (pthread_mutex_unlock(&mutex_test) != 0)
+    if (pthread_mutex_unlock(&mutex_test) == -1)
     {
         perror("error pthread mutex unlock");
         close_all();
@@ -159,7 +177,7 @@ static void signal_handler(int signo)
    if(signo == SIGINT || signo==SIGTERM) 
     {
 		shutdown(serv_sock_fd,SHUT_RDWR);
-		//finish = 1;    
+		finish = 1;    
     }
 }
 
@@ -210,7 +228,6 @@ void* handle_connection(void *threadp)
         exit(-1);
     }
 
-    
     int werr = write(thread_handle_sock->fd,thread_handle_sock->data_buf,loc);
     if (werr == -1)
     {
@@ -218,92 +235,83 @@ void* handle_connection(void *threadp)
         close_all();
         exit(-1);
     }
-	lseek(thread_handle_sock->fd,BEGIN,SEEK_SET);
+	
     if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
     {
         perror("sigprocmask unblock error");
         close_all();
         exit(-1);
     }
-    if(pthread_mutex_unlock(thread_handle_sock->lock) != 0)
+    if(pthread_mutex_unlock(thread_handle_sock->lock) == -1)
     {
         perror("mutex unlock error");
         close_all();
         exit(-1);
     }
-
-
-    int start = 0;
-    int extra=0;
-    char single_byte;
-    int outbuf_size = CHUNK_SIZE;
-	ssize_t rerr; 
-    if (sigprocmask(SIG_BLOCK,&(thread_handle_sock->mask),NULL) == -1)
+    
+    //compute file size
+    int file_length=lseek(thread_handle_sock->fd,BEGIN,SEEK_END);
+    thread_handle_sock->send_data_buf=calloc(file_length,sizeof(char));
+    //set back position to beginning after finding length
+    lseek(thread_handle_sock->fd,BEGIN,SEEK_SET);
+    if(thread_handle_sock->send_data_buf == NULL)
+	{
+		perror("calloc error");
+		close_all();
+		exit(-1);
+	}
+    
+    if (pthread_mutex_lock( thread_handle_sock->lock) == -1)
     {
-        perror("sigprocmask signal block");
-        close_all();
-        exit(-1);
-    }
-
-    if (pthread_mutex_lock( thread_handle_sock->lock) != 0){
-
         perror("mutex lock error");
         close_all();
         exit(-1);
 
     }
 
-    thread_handle_sock->send_data_buf = calloc(CHUNK_SIZE,sizeof(char));
-    
-    char *buffer2;
-    while((rerr = read(thread_handle_sock->fd,&single_byte,1)) > 0){
-
-        if(rerr <0 ) {
-
-             perror("read error");
-             close_all();
-             exit(-1);
-
-        }
-        thread_handle_sock->send_data_buf[start] = single_byte;
-        if(thread_handle_sock->send_data_buf[start] == '\n')
-        {   
-            if (send(thread_handle_sock->client_socket,thread_handle_sock->send_data_buf+extra,start - extra + 1, 0) == -1)
-            { 
-                perror("error send");
-                close_all();
-                //exit(-1);
-            }
-            extra = start + 1;
-        }
-
-        start++;
-
-        if(start >= outbuf_size){
-            
-            outbuf_size += CHUNK_SIZE;
-            buffer2=realloc(thread_handle_sock->send_data_buf,sizeof(char)*outbuf_size);
-            thread_handle_sock->send_data_buf=buffer2;
-
-        }
-
-
+    if (sigprocmask(SIG_BLOCK,&(thread_handle_sock->mask),NULL) == -1)
+    {
+        perror("sigprocmask block error");
+        close_all();
+        exit(-1);
     }
+    
+
+	
+	
+	int rerr = read(thread_handle_sock->fd, thread_handle_sock->send_data_buf, file_length);
+	if(rerr == -1 )
+	{
+		perror("read error");
+		close_all();
+		exit(-1);
+	}
+
+	int serr = send(thread_handle_sock->client_socket, thread_handle_sock->send_data_buf, rerr, 0);
+	if(serr == -1 )
+	{
+		perror("send error");
+		close_all();
+		exit(-1);
+	}		
+	
 	thread_handle_sock->thread_complete = true;
-    if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1){
+    if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
+    {
         perror("sigprocmask unblock error");
         close_all();
         exit(-1);
     }
 
-
-    if (pthread_mutex_unlock(thread_handle_sock->lock) != 0){
+    if (pthread_mutex_unlock(thread_handle_sock->lock) == -1)
+    {
 
         perror("mutex unlock error");
         close_all();
         exit(-1);
     }
     close(thread_handle_sock->client_socket);
+    //Clear both buffers used
     free(thread_handle_sock->data_buf);
     free(thread_handle_sock->send_data_buf);
     return threadp;
@@ -472,12 +480,14 @@ int main(int argc, char* argv[])
     sev.sigev_notify = SIGEV_THREAD;
     sev.sigev_value.sival_ptr = &td;
     sev.sigev_notify_function = timer_handle;
-    if ( timer_create(CLOCK_MONOTONIC,&sev,&timerid) != 0 ) {
+    if ( timer_create(CLOCK_MONOTONIC,&sev,&timerid) != 0 ) 
+    {
         perror("timer create error");
     }
     struct timespec start_time;
 
-     if ( clock_gettime(CLOCK_MONOTONIC,&start_time) != 0 ) {
+    if ( clock_gettime(CLOCK_MONOTONIC,&start_time) != 0 ) 
+    {
         perror("clock gettime error");
     } 
 
@@ -487,7 +497,8 @@ int main(int argc, char* argv[])
     itimerspec.it_interval.tv_sec = 10;
     itimerspec.it_interval.tv_nsec = 0;    
     
-    if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) {
+    if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) 
+    {
         perror("settime error");
     } 
 
@@ -504,8 +515,8 @@ int main(int argc, char* argv[])
 			perror("client error");
 
 		}
-		//if(finish) 
-		//	break;
+		if(finish) 
+			break;
 
 		//Below line of code reference: https://beej.us/guide/bgnet/html/
 		//Check if the connection address family is IPv4 or IPv6 and retrieve accordingly
