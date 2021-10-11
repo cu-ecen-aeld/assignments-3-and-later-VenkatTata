@@ -51,7 +51,8 @@ typedef struct{
     sigset_t mask;
     bool thread_complete_success;
     pthread_mutex_t *mutex;
-    
+    char * buf_data;
+    char* send_data_buf;
 }threadParams_t;
 
 static inline void timespec_add( struct timespec *result,
@@ -108,7 +109,8 @@ void close_all()
         if (slist_ptr->threadParams.thread_complete_success != true){
 
             pthread_cancel(slist_ptr->threadParams.threads);
-         
+			free(slist_ptr->threadParams.buf_data);
+			free(slist_ptr->threadParams.send_data_buf);
             
         }
 
@@ -137,23 +139,24 @@ void timer_handler(int signo)
 {
 	char time_buffer[100];
 	time_t current_time;
-        struct tm *timer_info;
-        time(&current_time);
-        timer_info = localtime(&current_time);
+	struct tm *timer_info;
+	time(&current_time);
+	timer_info = localtime(&current_time);
 
-        int timer_buffer_size = strftime(time_buffer,100,"timestamp:%a, %d %b %Y %T %z\n",timer_info);
-timestamp_len=timer_buffer_size;
-        pthread_mutex_lock(&file_mutex);
+	int timer_buffer_size = strftime(time_buffer,100,"timestamp:%a, %d %b %Y %T %z\n",timer_info);
+	timestamp_len=timer_buffer_size;
+	pthread_mutex_lock(&file_mutex);
 
-        //write to file
-        int timer_writebytes = write(output_file_fd,time_buffer,timer_buffer_size);
-        if(timer_writebytes == -1){
-        printf("Error in writing time to file\n");
-        close_all();
-        exit(-1);
-        }
+	//write to file
+	int timer_writebytes = write(output_file_fd,time_buffer,timer_buffer_size);
+	if(timer_writebytes == -1)
+	{
+		printf("Error in writing time to file\n");
+		close_all();
+		exit(-1);
+		}
 
-        pthread_mutex_unlock(&file_mutex);
+	pthread_mutex_unlock(&file_mutex);
 }
 //static void timer_thread(union sigval sigval)
 //{
@@ -235,8 +238,8 @@ void handle_connection(void *threadp)
 {
 	threadParams_t *threadsock = (threadParams_t*)threadp;
 	//Allocates buffer and initializes value to 0, same as malloc
-	char *buf_data=calloc(CHUNK_SIZE,sizeof(char));
-	if(buf_data==NULL)
+	threadsock->buf_data=calloc(CHUNK_SIZE,sizeof(char));
+	if(threadsock->buf_data==NULL)
 	{
 		syslog(LOG_ERR,"calloc failed");
 		close_all();
@@ -253,7 +256,7 @@ void handle_connection(void *threadp)
 		exit(-1);
 	}
 	//Recieve the data and store in updated location always if available
-	while((len=recv(threadsock->client_socket , buf_data + loc , CHUNK_SIZE , 0))>0)
+	while((len=recv(threadsock->client_socket , threadsock->buf_data + loc , CHUNK_SIZE , 0))>0)
 	{
 		if(len == -1)
 		{
@@ -262,7 +265,7 @@ void handle_connection(void *threadp)
 			exit(-1);
 		}
 		
-		if(strchr(buf_data ,'\n') != NULL)
+		if(strchr(threadsock->buf_data ,'\n') != NULL)
 			break;
 		//Update the current location if newline not found
 		loc+=len;
@@ -270,8 +273,8 @@ void handle_connection(void *threadp)
 		//if no new line character, need to add more memory and dynamically
 		//reallocate with an extra chunk
 		counter++;
-		buf_data=(char*)realloc(buf_data,((counter*CHUNK_SIZE)*sizeof(char)));
-		if(buf_data==NULL)
+		threadsock->buf_data=(char*)realloc(threadsock->buf_data,((counter*CHUNK_SIZE)*sizeof(char)));
+		if(threadsock->buf_data==NULL)
 		{
 			syslog(LOG_ERR,"error realloc");
 			close_all();
@@ -287,7 +290,7 @@ void handle_connection(void *threadp)
 		exit(-1);
 	}	
 	//Write to file and position is updated
-	int werr = write(threadsock->fd,buf_data,strlen(buf_data));
+	int werr = write(threadsock->fd,threadsock->buf_data,strlen(threadsock->buf_data));
 	if (werr == -1)
 	{
 		perror("write error");
@@ -297,17 +300,17 @@ void handle_connection(void *threadp)
 	
 	//Store last position of file
 	//int last_position = lseek(output_file_fd, 0, SEEK_CUR);
-	total_length += (strlen(buf_data));
+	total_length += (strlen(threadsock->buf_data));
 	//Place position ot beginnging
 	lseek(threadsock->fd, 0, SEEK_SET);
-	char * send_data_buf=calloc(total_length+timestamp_len,sizeof(char));
-	if(send_data_buf == NULL)
+	threadsock->send_data_buf=calloc(total_length+timestamp_len,sizeof(char));
+	if(threadsock->send_data_buf == NULL)
 	{
 		perror("calloc error");
 		close_all();
 		exit(-1);
 	}
-	int rerr=read(threadsock->fd,send_data_buf,total_length+timestamp_len);
+	int rerr=read(threadsock->fd,threadsock->send_data_buf,total_length+timestamp_len);
 	//syslog(LOG_DEBUG,"read length %d",total_length);
 	if (rerr == -1)
 	{
@@ -318,7 +321,7 @@ void handle_connection(void *threadp)
 	
 	//syslog(LOG_DEBUG," data to send %s",send_data_buf);
 	//Send contents of buffer to client back
-	int serr=send(threadsock->client_socket,send_data_buf,total_length+timestamp_len, 0);
+	int serr=send(threadsock->client_socket,threadsock->send_data_buf,total_length+timestamp_len, 0);
 	if(serr == -1)
 	{
 		close_all();
@@ -335,8 +338,8 @@ void handle_connection(void *threadp)
 	}
 	
 		
-	free(buf_data);
-	free(send_data_buf);
+	free(threadsock->buf_data);
+	free(threadsock->send_data_buf);
 	
 	threadsock->thread_complete_success = true;
 	//Once complete, buffer cleared
@@ -578,6 +581,7 @@ int main(int argc, char *argv[])
 		slist_ptr->threadParams.fd=output_file_fd;
 		slist_ptr->threadParams.thread_complete_success = false;
 		slist_ptr->threadParams.mutex=&file_mutex;
+		
 		pthread_create(&(slist_ptr->threadParams.threads),NULL,(void*)&handle_connection,(void*)&(slist_ptr->threadParams));
 		
 		SLIST_FOREACH(slist_ptr,&head,entries)
