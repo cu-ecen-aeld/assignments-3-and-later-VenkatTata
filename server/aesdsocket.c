@@ -240,7 +240,7 @@ static void signal_handler(int signo)
 }
 
 
-void handle_connection(void *threadp)
+void* handle_connection(void *threadp)
 {
 	threadParams_t *threadsock = (threadParams_t*)threadp;
 	//Allocates buffer and initializes value to 0, same as malloc
@@ -362,6 +362,7 @@ void handle_connection(void *threadp)
 	}
 	
 	close(threadsock->client_socket);
+	return threadp;
 }
 
 int main(int argc, char *argv[])
