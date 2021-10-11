@@ -188,7 +188,9 @@ void *get_in_addr(struct sockaddr *sa)
 static void signal_handler(int signo)
 {
 	//thread safe disabling of both reading and writing
-	shutdown(serv_sock_fd,SHUT_RDWR);	
+	shutdown(serv_sock_fd,SHUT_RDWR);
+	//Delete and unlink the file
+	remove(TEST_FILE);
 }
 
 
