@@ -95,14 +95,14 @@ void close_all()
 	close(serv_sock_fd);
 	//Close regular file - output file fd
 	close(output_file_fd);
-	
+	//Delete and unlink the file
+	remove(TEST_FILE);
 	//After completing above procedure successfuly, exit logged
 	syslog(LOG_DEBUG,"Caught signal, exiting");
 	
 	
 	
-	//Delete and unlink the file
-	remove(TEST_FILE);
+	
 	
 	SLIST_FOREACH(slist_ptr,&head,entries){
 
@@ -225,12 +225,13 @@ void *get_in_addr(struct sockaddr *sa)
 //Signal handler for Signals SIGTERM and SIGINT
 static void signal_handler(int signo)
 {
-	if(signo == SIGINT || signo==SIGTERM) {
-	//thread safe disabling of both reading and writing
-	shutdown(serv_sock_fd,SHUT_RDWR);
-	//Delete and unlink the file
-	remove(TEST_FILE);
-}
+	if(signo == SIGINT || signo==SIGTERM) 
+	{
+		//thread safe disabling of both reading and writing
+		shutdown(serv_sock_fd,SHUT_RDWR);
+		//Delete and unlink the file
+		remove(TEST_FILE);
+	}
 }
 
 
@@ -480,7 +481,7 @@ int main(int argc, char *argv[])
 	}
 	
 	//If bind passes, open a new file to store the packet that will be read
-	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND|O_SYNC,0644);
+	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
 	if(output_file_fd == -1)
 	{
 		perror("error opening file at /var/temp/aesdsocketdata");
@@ -498,19 +499,23 @@ int main(int argc, char *argv[])
 	}
 	freeaddrinfo(res);
 
-	pthread_mutex_init( &file_mutex, NULL);
+	int ra=pthread_mutex_init( &file_mutex, NULL);
+	if(ra != 0)
+	{
+		close_all();
+		exit(-1);
+	}
 	signal(SIGALRM, timer_handler);
-    	struct itimerval timer;
+	struct itimerval timer;
    	timer.it_value.tv_sec = 10;
-    	timer.it_value.tv_usec = 0;
-    	timer.it_interval.tv_sec = 10;
-    	timer.it_interval.tv_usec = 0;
-    	if (setitimer (ITIMER_REAL, &timer, NULL) != 0)
-    	{
-        	printf("error in setting time\n");
-        	close_all();
-      
-    	}
+	timer.it_value.tv_usec = 0;
+	timer.it_interval.tv_sec = 10;
+	timer.it_interval.tv_usec = 0;
+	if (setitimer (ITIMER_REAL, &timer, NULL) != 0)
+	{
+		close_all();
+		exit(-1);
+	}
     //thread_data td;
     //td.fd = output_file_fd;
 	//struct sigevent sev;
@@ -596,5 +601,6 @@ int main(int argc, char *argv[])
 			//}
         }
 	}
+	close_all();
 	return 0;
 }	
