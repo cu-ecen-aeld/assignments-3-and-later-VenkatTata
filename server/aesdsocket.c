@@ -137,13 +137,13 @@ static void timer_thread(union sigval sigval)
 	 
     size_t size= strftime(time_string,100,"timestamp:%a, %d %b %Y %T %z\n",localtime(&rtime));
 
-    int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
-	if(merr == -1)
-	{
-		perror("sigprocmask unblock error");
-		close_all();
-		exit(-1);
-	}
+    //int merr=sigprocmask(SIG_BLOCK, &socket_set, NULL);
+	//if(merr == -1)
+	//{
+	//	perror("sigprocmask unblock error");
+	//	close_all();
+//		exit(-1);
+	//}
 	timestamp_len=size;
 
     // Write to file
@@ -160,13 +160,13 @@ static void timer_thread(union sigval sigval)
 		close_all();
 		exit(-1);
 	}
-	merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
-	if(merr == -1)
-	{
-		perror("sigprocmask unblock error");
-		close_all();
-		exit(-1);
-	}
+	//merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
+	//if(merr == -1)
+	//{
+	//	perror("sigprocmask unblock error");
+	//	close_all();
+	//	exit(-1);
+	//}
 	
 	
 
