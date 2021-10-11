@@ -52,6 +52,17 @@ typedef struct{
     bool thread_complete_success;
 }threadParams_t;
 
+static inline void timespec_add( struct timespec *result,
+                        const struct timespec *ts_1, const struct timespec *ts_2)
+{
+    result->tv_sec = ts_1->tv_sec + ts_2->tv_sec;
+    result->tv_nsec = ts_1->tv_nsec + ts_2->tv_nsec;
+    if( result->tv_nsec > 1000000000L ) {
+        result->tv_nsec -= 1000000000L;
+        result->tv_sec ++;
+    }
+}
+
 //Reference : https://blog.taborkelly.net/programming/c/2016/01/09/sys-queue-example.html
 typedef struct slist_data_s slist_data_t;
 struct slist_data_s{
@@ -62,8 +73,7 @@ struct slist_data_s{
 slist_data_t *slist_ptr = NULL;
 SLIST_HEAD(slisthead,slist_data_s) head;
 
-pthread_mutex_t file_mutex;
-
+pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct thread_data
 {
@@ -104,7 +114,7 @@ void close_all()
 		perror("timer delete error");
 	}
 	
-	pthread_mutex_destroy(&file_mutex);
+	
     // close log
     closelog();
 
@@ -201,7 +211,6 @@ void handle_connection(void *threadp)
 		close_all();
 		exit(-1);
 	}
-	
 	//Recieve the data and store in updated location always if available
 	while((len=recv(threadsock->client_socket , buf_data + loc , CHUNK_SIZE , 0))>0)
 	{
@@ -457,8 +466,8 @@ int main(int argc, char *argv[])
     struct itimerspec itimerspec;
     struct timespec start_time;
     
-    itimerspec.it_value.tv_sec = 10;
-    itimerspec.it_value.tv_nsec = 0;
+    //itimerspec.it_value.tv_sec = 10;
+    //itimerspec.it_value.tv_nsec = 0;
     itimerspec.it_interval.tv_sec = 10;
     itimerspec.it_interval.tv_nsec = 0;
     if ( timer_create(clock_id,&sev,&timerid) != 0 ) 
@@ -474,8 +483,10 @@ int main(int argc, char *argv[])
         close_all();
         exit(-1);
     } 
-
-    if( timer_settime(timerid, 0, &itimerspec, NULL ) != 0 ) 
+	
+	timespec_add(&itimerspec.it_value,&start_time,&itimerspec.it_interval);
+	
+    if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 )
     {
         perror("error timer_settime");
         close_all();
@@ -500,8 +511,6 @@ int main(int argc, char *argv[])
 		//Convert the binary to text before logging 
 		inet_ntop(AF_INET, get_in_addr((struct sockaddr *)&conn_addr), IP_addr, sizeof(IP_addr));
         syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);   
-		
-		pthread_mutex_init( &file_mutex, NULL);
 		
 		//Singely linked list to manage thread parameters
 		slist_ptr = (slist_data_t*)malloc(sizeof(slist_data_t));
