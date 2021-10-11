@@ -46,7 +46,14 @@ typedef struct{
     sigset_t mask;
 }threadParams_t;
 
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
 
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
 
 typedef struct slist_data_s slist_data_t;
 struct slist_data_s{
@@ -61,9 +68,8 @@ SLIST_HEAD(slisthead,slist_data_s) head;
 
 
 
-
+char IP_addr[INET6_ADDRSTRLEN];
 pthread_mutex_t mutex_test;
-//pid_t check;
 timer_t timerid;
 int serv_sock_fd,client_sock_fd,counter =1,output_file_fd,finish;
 struct sockaddr_in conn_addr;
@@ -123,7 +129,6 @@ static void timer_handle(union sigval sigval){
         close_all();
         exit(-1);
     }
-
 }
 
 
@@ -154,23 +159,16 @@ void close_all(){
     pthread_mutex_destroy(&mutex_test);           
     timer_delete(timerid);                                
     closelog();
-    
 }
 
 
-static void signal_handler(int signo){
-
-
-    if(signo == SIGINT || signo==SIGTERM) {
-
-
-    shutdown(serv_sock_fd,SHUT_RDWR);
-
-    finish = 1;
-
-    
+static void signal_handler(int signo)
+{
+   if(signo == SIGINT || signo==SIGTERM) 
+    {
+		shutdown(serv_sock_fd,SHUT_RDWR);
+		finish = 1;    
     }
-
 }
 
 
@@ -432,8 +430,6 @@ int main(int argc, char* argv[])
 		exit (EXIT_FAILURE);
 	}
 
-  
-
 	//Adding only signals SIGINT and SIGTERM to an empty set to enable only them
 	
 	rc = sigemptyset(&socket_set);
@@ -455,8 +451,6 @@ int main(int argc, char* argv[])
 		exit(-1);
 	}  
 
-    
-    
 	//Post binding, the server is running on the port 9000, so now
 	//remote connections (client) can listen to server
 	//Backlog - queue of incoming connections before being accepted to send/recv 
@@ -541,10 +535,7 @@ int main(int argc, char* argv[])
     itimerspec.it_value.tv_sec = 10;
     itimerspec.it_value.tv_nsec = 0;
     itimerspec.it_interval.tv_sec = 10;
-    itimerspec.it_interval.tv_nsec = 0;
-
-    //timespec_add(&itimerspec.it_value,&start_time,&itimerspec.it_interval);
-    
+    itimerspec.it_interval.tv_nsec = 0;    
     
     if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) {
         perror("settime error");
@@ -552,52 +543,51 @@ int main(int argc, char* argv[])
 
     slist_data_t *temp_node = NULL;
 
-    while(!finish) {
+    while(1) 
+    {
+		socklen_t conn_addr_len = sizeof(conn_addr);
+		//Accept an incoming connection
+		client_sock_fd = accept(serv_sock_fd,(struct sockaddr *)&conn_addr,&conn_addr_len);
+		if(client_sock_fd ==-1)
+		{
+			//If no incoming connection, graceful termination done
+			perror("client error");
 
+		}
+		if(finish) 
+			break;
 
-    socklen_t len = sizeof(conn_addr);
+		//Below line of code reference: https://beej.us/guide/bgnet/html/
+		//Check if the connection address family is IPv4 or IPv6 and retrieve accordingly
+		//Convert the binary to text before logging 
+		inet_ntop(AF_INET, get_in_addr((struct sockaddr *)&conn_addr), IP_addr, sizeof(IP_addr));
+        syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);
 
-   
-    client_sock_fd = accept(serv_sock_fd,(struct sockaddr *)&conn_addr,&len);
+		slist_ptr = (slist_data_t*)malloc(sizeof(slist_data_t));
+		SLIST_INSERT_HEAD(&head,slist_ptr,entries);                                          
+		slist_ptr->threadParams.client_socket = client_sock_fd;
+		slist_ptr->threadParams.thread_complete = false;
+		slist_ptr->threadParams.fd=output_file_fd;
+		slist_ptr->threadParams.mask = socket_set;
+		slist_ptr->threadParams.lock = &mutex_test;
 
-    if(finish) break;
+		if (pthread_create(&(slist_ptr->threadParams.threads),(void*)0,&handle_connection,(void*)&(slist_ptr->threadParams)) != 0){
 
-    if (client_sock_fd == -1 ){
-        perror("client error");
-    }
+			perror("pthread error");
+			close_all();
+			exit(-1);
+		}
 
-    char *ip_string = inet_ntoa(conn_addr.sin_addr);
-    
-    syslog(LOG_DEBUG,"Accepted connection from %s",ip_string);
-    
-    slist_ptr = (slist_data_t*)malloc(sizeof(slist_data_t));
-    SLIST_INSERT_HEAD(&head,slist_ptr,entries);                                          
-    slist_ptr->threadParams.client_socket = client_sock_fd;
-    slist_ptr->threadParams.thread_complete = false;
-    slist_ptr->threadParams.fd=output_file_fd;
-    slist_ptr->threadParams.mask = socket_set;
-    slist_ptr->threadParams.lock = &mutex_test;
-    
-
-    
-    if (pthread_create(&(slist_ptr->threadParams.threads),(void*)0,&handle_connection,(void*)&(slist_ptr->threadParams)) != 0){
-
-        perror("pthread error");
-        close_all();
-        exit(-1);
-    }
-
-    SLIST_FOREACH_SAFE(slist_ptr,&head,entries,temp_node ){
-        if (slist_ptr->threadParams.thread_complete == true){
-            pthread_join(slist_ptr->threadParams.threads,NULL);
-            SLIST_REMOVE(&head,slist_ptr,slist_data_s,entries);
-            free(slist_ptr);
-            slist_ptr=NULL;
-        }
-    }
-}
-
-close_all();
-return 0;
-
+		SLIST_FOREACH_SAFE(slist_ptr,&head,entries,temp_node )
+		{
+			if (slist_ptr->threadParams.thread_complete == true){
+				pthread_join(slist_ptr->threadParams.threads,NULL);
+				SLIST_REMOVE(&head,slist_ptr,slist_data_s,entries);
+				free(slist_ptr);
+				slist_ptr=NULL;
+			}
+		}
+	}
+	close_all();
+	return 0;
 }
