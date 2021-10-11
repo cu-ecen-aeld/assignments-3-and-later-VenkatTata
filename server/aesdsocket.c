@@ -35,6 +35,29 @@
 #define BACKLOG 10
 #define TEST_FILE "/var/tmp/aesdsocketdata"
 #define BEGIN 0
+
+char IP_addr[INET6_ADDRSTRLEN];
+pthread_mutex_t mutex_test;
+timer_t timerid;
+int serv_sock_fd,client_sock_fd,counter =1,output_file_fd;
+//int finish;
+struct sockaddr_in conn_addr;
+
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+typedef struct sigsev_data{
+
+    int fd; 
+
+}sigsev_data;
+
 typedef struct{
 	pthread_mutex_t *lock;
     bool thread_complete;
@@ -45,15 +68,6 @@ typedef struct{
     char* send_data_buf;
     sigset_t mask;
 }threadParams_t;
-
-void *get_in_addr(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
-
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
 
 typedef struct slist_data_s slist_data_t;
 struct slist_data_s{
@@ -66,23 +80,34 @@ struct slist_data_s{
 slist_data_t *slist_ptr = NULL;
 SLIST_HEAD(slisthead,slist_data_s) head;
 
+void close_all(){
 
+    //finish = 1;
+    close(serv_sock_fd);
+    close(output_file_fd);
 
-char IP_addr[INET6_ADDRSTRLEN];
-pthread_mutex_t mutex_test;
-timer_t timerid;
-int serv_sock_fd,client_sock_fd,counter =1,output_file_fd,finish;
-struct sockaddr_in conn_addr;
+    if(remove(TEST_FILE) != 0){
+        syslog(LOG_ERR,"error remove");
+    }
+    
+    SLIST_FOREACH(slist_ptr,&head,entries){
 
-
-typedef struct sigsev_data{
-
-    int fd; 
-
-}sigsev_data;
-
-
-void close_all();
+        if (slist_ptr->threadParams.thread_complete != true){
+            pthread_cancel(slist_ptr->threadParams.threads);
+            //free(slist_ptr->threadParams.data_buf);
+            //free(slist_ptr->threadParams.send_data_buf);   
+        }
+    }
+    
+    while(!SLIST_EMPTY(&head)){
+        slist_ptr = SLIST_FIRST(&head);
+        SLIST_REMOVE_HEAD(&head,entries);
+        free(slist_ptr);
+    }
+    pthread_mutex_destroy(&mutex_test);           
+    timer_delete(timerid);                                
+    closelog();
+}
 
 static inline void timespec_add( struct timespec *result,
                         const struct timespec *ts_1, const struct timespec *ts_2)
@@ -94,8 +119,6 @@ static inline void timespec_add( struct timespec *result,
         result->tv_sec ++;
     }
 }
-
-
 
 static void timer_handle(union sigval sigval){
 
@@ -131,57 +154,21 @@ static void timer_handle(union sigval sigval){
     }
 }
 
-
-void close_all(){
-
-    finish = 1;
-    close(serv_sock_fd);
-    close(output_file_fd);
-
-    if(remove(TEST_FILE) != 0){
-        syslog(LOG_ERR,"error remove");
-    }
-    
-    SLIST_FOREACH(slist_ptr,&head,entries){
-
-        if (slist_ptr->threadParams.thread_complete != true){
-            pthread_cancel(slist_ptr->threadParams.threads);
-            //free(slist_ptr->threadParams.data_buf);
-            //free(slist_ptr->threadParams.send_data_buf);   
-        }
-    }
-    
-    while(!SLIST_EMPTY(&head)){
-        slist_ptr = SLIST_FIRST(&head);
-        SLIST_REMOVE_HEAD(&head,entries);
-        free(slist_ptr);
-    }
-    pthread_mutex_destroy(&mutex_test);           
-    timer_delete(timerid);                                
-    closelog();
-}
-
-
 static void signal_handler(int signo)
 {
    if(signo == SIGINT || signo==SIGTERM) 
     {
 		shutdown(serv_sock_fd,SHUT_RDWR);
-		finish = 1;    
+		//finish = 1;    
     }
 }
-
 
 void* handle_connection(void *threadp)
 {
 
     threadParams_t *thread_handle_sock = (threadParams_t*)threadp;
-    int loc=0;
-      
-    char *buffer2;
+    int loc=0,len=0;
     thread_handle_sock->data_buf = calloc(CHUNK_SIZE,sizeof(char));
-    int len;
-  
 	while((len=recv(thread_handle_sock->client_socket , thread_handle_sock->data_buf + loc , CHUNK_SIZE , 0))>0)
 	{
 		if(len == -1)
@@ -268,44 +255,7 @@ void* handle_connection(void *threadp)
 
     thread_handle_sock->send_data_buf = calloc(CHUNK_SIZE,sizeof(char));
     
-    /*while((rerr = read(thread_handle_sock->fd,&thread_handle_sock->send_data_buf+start,CHUNK_SIZE)) > 0)
-    {
-		if(rerr <0 ) {
-
-             perror("read error");
-             close_all();
-             exit(-1);
-
-        }
-        extra += rerr;
-        //thread_handle_sock->send_data_buf[start] = single_byte;
-        if(strchr(thread_handle_sock->send_data_buf ,'\n') == NULL)
-        { 
-			break;
-			 
-            
-           
-        }
-
-        start+=CHUNK_SIZE;
-
-        if(start >= outbuf_size){
-            
-            outbuf_size += CHUNK_SIZE;
-            buffer2=realloc(thread_handle_sock->send_data_buf,sizeof(char)*outbuf_size);
-            thread_handle_sock->send_data_buf=buffer2;
-
-        }
-				
-	}
-	if (send(thread_handle_sock->client_socket,thread_handle_sock->send_data_buf,extra, 0) == -1)
-	{ 
-		perror("error send");
-		close_all();
-		//exit(-1);
-	}
-		*/
-    
+    char *buffer2;
     while((rerr = read(thread_handle_sock->fd,&single_byte,1)) > 0){
 
         if(rerr <0 ) {
@@ -554,8 +504,8 @@ int main(int argc, char* argv[])
 			perror("client error");
 
 		}
-		if(finish) 
-			break;
+		//if(finish) 
+		//	break;
 
 		//Below line of code reference: https://beej.us/guide/bgnet/html/
 		//Check if the connection address family is IPv4 or IPv6 and retrieve accordingly
