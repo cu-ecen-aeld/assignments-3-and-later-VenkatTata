@@ -142,12 +142,12 @@ static void timer_thread(union sigval sigval)
 	//}
 	timestamp_len=size;
 	
-	int rc=pthread_mutex_lock(&file_mutex);
-	if(rc !=0)
-	{
-		close_all();
-		exit(-1);
-	}
+	//int rc=pthread_mutex_lock(&file_mutex);
+	//if(rc !=0)
+	//{
+	//	close_all();
+	//	exit(-1);
+	//}
     // Write to file
     int wbytes = write(td->fd,time_string,size);
     if (wbytes == -1){
@@ -156,12 +156,12 @@ static void timer_thread(union sigval sigval)
         exit(-1);
     }
     
-    rc=pthread_mutex_unlock(&file_mutex);
-    if(rc !=0)
-    {
-		close_all();
-		exit(-1);
-	}
+    //rc=pthread_mutex_unlock(&file_mutex);
+    //if(rc !=0)
+    //{
+	//	close_all();
+	//	exit(-1);
+	//}
 	//merr=sigprocmask(SIG_UNBLOCK, &socket_set, NULL);
 	//if(merr == -1)
 	//{
@@ -286,9 +286,7 @@ void handle_connection(void *threadp)
 		perror("send error");
 		exit(-1);
 	}
-	
-	free(buf_data);
-	free(send_data_buf);
+
 	
 	rc=pthread_mutex_unlock(&file_mutex);
 	if(rc !=0)
@@ -296,7 +294,11 @@ void handle_connection(void *threadp)
 		close_all();
 		exit(-1);
 	}
-
+	
+		
+	free(buf_data);
+	free(send_data_buf);
+	
 	threadsock->thread_complete_success = true;
 	//Once complete, buffer cleared
 
