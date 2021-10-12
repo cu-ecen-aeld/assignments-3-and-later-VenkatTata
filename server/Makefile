@@ -10,14 +10,11 @@ ifeq ($(LDFLAGS),)
 	LDFLAGS = -pthread -lrt
 endif
 
-all: default
-
-default: aesdsocket
+all: aesdsocket
 
 aesdsocket: aesdsocket.c
 	$(CC) $^ -o $@ $(INCLUDES) $(LDFLAGS) $(CFLAGS)
 
 clean:
-	rm -f aesdsocket aesdsocket.o
-
-.PHONY: clean
+	rm -f aesdsocket *.o
+	rm -f valgrind-out.txt

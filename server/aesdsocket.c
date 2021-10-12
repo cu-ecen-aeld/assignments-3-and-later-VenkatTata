@@ -6,7 +6,7 @@
  * 	    and are handled.
  *			
  * @author	Venkat Sai Krishna Tata
- * @Date	10/02/2021
+ * @Date	10/10/2021
  * @References: Textbook: Linux System Programming
  *		https://stackoverflow.com/questions/803776/help-comparing-an-argv-string
  *		https://beej.us/guide/bgnet/html/
@@ -103,16 +103,16 @@ void close_all(){
 	syslog(LOG_DEBUG,"Caught signal, exiting");
 	
     
-    SLIST_FOREACH(slist_ptr,&head,entries){
-
-        if (slist_ptr->threadParams.thread_complete != true){
+    SLIST_FOREACH(slist_ptr,&head,entries)
+    {
+        if (slist_ptr->threadParams.thread_complete != true)
+        {
             pthread_cancel(slist_ptr->threadParams.threads);
-            //free(slist_ptr->threadParams.data_buf);
-            //free(slist_ptr->threadParams.send_data_buf);   
         }
     }
     
-    while(!SLIST_EMPTY(&head)){
+    while(!SLIST_EMPTY(&head))
+    {
         slist_ptr = SLIST_FIRST(&head);
         SLIST_REMOVE_HEAD(&head,entries);
         free(slist_ptr);
@@ -275,10 +275,7 @@ void* handle_connection(void *threadp)
         close_all();
         exit(-1);
     }
-    
-
-	
-	
+    	
 	int rerr = read(thread_handle_sock->fd, thread_handle_sock->send_data_buf, file_length);
 	if(rerr == -1 )
 	{
@@ -324,7 +321,6 @@ int main(int argc, char* argv[])
 
 	//Opens a connection with facility as LOG_USER to Syslog.
 	openlog("aesdsocket",0,LOG_USER);
-    
 
     SLIST_INIT(&head);
 
@@ -358,7 +354,6 @@ int main(int argc, char* argv[])
 	int dummie =1;
 	if (setsockopt(serv_sock_fd, SOL_SOCKET, SO_REUSEADDR, &dummie, sizeof(int)) == -1) 
 	{	
-		
 		perror("setsockopt error");
     }
     
@@ -389,19 +384,20 @@ int main(int argc, char* argv[])
 	}
 
 	//Adding only signals SIGINT and SIGTERM to an empty set to enable only them
-	
 	rc = sigemptyset(&socket_set);
 	if(rc !=0)
 	{
 		perror("signal empty set error");
 		exit(-1);
 	}
+	
 	rc = sigaddset(&socket_set,SIGINT);
 	if(rc !=0)
 	{
 		perror("error adding signal SIGINT to set");
 		exit(-1);
 	}
+	
 	rc = sigaddset(&socket_set,SIGTERM);
 	if(rc !=0)
 	{
@@ -532,17 +528,13 @@ int main(int argc, char* argv[])
 		slist_ptr->threadParams.mask = socket_set;
 		slist_ptr->threadParams.lock = &mutex_test;
 
-		if (pthread_create(&(slist_ptr->threadParams.threads),(void*)0,&handle_connection,(void*)&(slist_ptr->threadParams)) != 0){
-
-			perror("pthread error");
-			close_all();
-			exit(-1);
-		}
+		pthread_create(&(slist_ptr->threadParams.threads),NULL,&handle_connection,(void*)&(slist_ptr->threadParams));
 
 		SLIST_FOREACH_SAFE(slist_ptr,&head,entries,temp_node )
 		{
-			if (slist_ptr->threadParams.thread_complete == true){
-				pthread_join(slist_ptr->threadParams.threads,NULL);
+			pthread_join(slist_ptr->threadParams.threads,NULL);
+			if (slist_ptr->threadParams.thread_complete == true)
+			{
 				SLIST_REMOVE(&head,slist_ptr,slist_data_s,entries);
 				free(slist_ptr);
 				slist_ptr=NULL;
