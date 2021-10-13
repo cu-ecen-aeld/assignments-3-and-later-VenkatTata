@@ -1,14 +1,20 @@
-CC=gcc
-CROSS_COMPILE=
+ifeq ($(CC),)
+	CC = ${CROSS_COMPILE}gcc
+endif
+
+ifeq ($(CFLAGS),)
+	CFLAGS = -g -Wall -Werror 
+endif
+
+ifeq ($(LDFLAGS),)
+	LDFLAGS = -pthread -lrt
+endif
 
 all: aesdsocket
 
-clean:
-		-rm -f *.o aesdsocket
+aesdsocket: aesdsocket.c
+	$(CC) $^ -o $@ $(INCLUDES) $(LDFLAGS) $(CFLAGS)
 
-%.o:%.c
-	$(CROSS_COMPILE)$(CC) -c -o $@ $< -Wall -Werror
-	
-aesdsocket:aesdsocket.o
-	$(CROSS_COMPILE)$(CC) -o $@ $^
-	
+clean:
+	rm -f aesdsocket *.o
+	rm -f valgrind-out.txt
