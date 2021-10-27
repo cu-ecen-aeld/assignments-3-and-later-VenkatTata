@@ -129,7 +129,7 @@ void aesd_circular_buffer_deallocate(struct aesd_circular_buffer *buffer)
 			#ifdef __KERNEL__
 				kfree(entry->buffptr);
 			#else
-				free(entry->buffptr);	
+				free((void*)entry->buffptr);	
 			#endif
 		}
 		
