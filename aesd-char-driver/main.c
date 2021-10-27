@@ -120,8 +120,12 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 		goto done;
 	}
 	
-	//Allocates count bytes of memory always, resizes accordingly as required
-	my_dev->write_entry.buffptr = krealloc(my_dev->write_entry.buffptr, count,GFP_KERNEL);
+	//Full test requires realloc if entry changes	
+	//If not already allocated, reallocate
+	if (my_dev->write_entry.size == 0)
+		my_dev->write_entry.buffptr = kzalloc(count,GFP_KERNEL);
+	else
+		my_dev->write_entry.buffptr = krealloc(my_dev->write_entry.buffptr, my_dev->write_entry.size + count, GFP_KERNEL);
 	if (my_dev->write_entry.buffptr == NULL)
 	{ 
 		retval = -ENOMEM;
