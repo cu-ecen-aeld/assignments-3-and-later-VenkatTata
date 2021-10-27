@@ -73,12 +73,13 @@ const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
     * TODO: implement per description 
     */
     
-    const char* overwritten_entry=NULL;
+    	const char* overwritten_entry=NULL;
 	//Check if the buffer is not NULL
 	if(buffer == NULL)
 		return NULL;
 	if(buffer->full)
 		overwritten_entry= buffer->entry[buffer->out_offs].buffptr;
+		
 	//Store the buffptr and its size into circular buffer
 	buffer->entry[buffer->in_offs] = *add_entry;
 	
@@ -87,17 +88,14 @@ const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
 	//reaching the end of circular buffer, just like the "in" , even the "out" is wrapped around
 	if(buffer->out_offs != buffer->in_offs)
 	{
-	buffer->full = false;
+		buffer->full = false;
 	}
 	else if (buffer->out_offs == buffer->in_offs)
 	{
 			if(buffer->initial == false)
 			{
 				buffer->full = true;
-
-
 				buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-
 			}
 			else
 				buffer->initial=false;

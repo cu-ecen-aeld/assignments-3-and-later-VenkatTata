@@ -294,7 +294,6 @@ void* handle_connection(void *threadp)
     //compute file size
     //int file_length=lseek(output_file_fd,BEGIN,SEEK_END);
     thread_handle_sock->send_data_buf=malloc(CHUNK_SIZE * sizeof(char));
-    //syslog(LOG_DEBUG,"file_lenght not therefile_size %d",file_size);
     //set back position to beginning after finding length
     lseek(output_file_fd,BEGIN,SEEK_SET);
     if(thread_handle_sock->send_data_buf == NULL)
@@ -518,39 +517,39 @@ int main(int argc, char* argv[])
 	#if USE_AESD_CHAR_DEVICE
 	#else
 	//Below timer reference : https://github.com/cu-ecen-aeld/aesd-lectures/blob/master/lecture9/timer_thread.c
-    struct sigevent sev;
-    sigsev_data td;
-    td.fd = output_file_fd;
-    memset(&sev,0,sizeof(struct sigevent));
-    sev.sigev_notify = SIGEV_THREAD;
-    sev.sigev_value.sival_ptr = &td;
-    sev.sigev_notify_function = timer_handle;
-    if ( timer_create(CLOCK_MONOTONIC,&sev,&timerid) != 0 ) 
-    {
-        perror("timer create error");
-    }
-    struct timespec start_time;
+	struct sigevent sev;
+	sigsev_data td;
+	td.fd = output_file_fd;
+	memset(&sev,0,sizeof(struct sigevent));
+	sev.sigev_notify = SIGEV_THREAD;
+	sev.sigev_value.sival_ptr = &td;
+	sev.sigev_notify_function = timer_handle;
+	if ( timer_create(CLOCK_MONOTONIC,&sev,&timerid) != 0 ) 
+	{
+	perror("timer create error");
+	}
+	struct timespec start_time;
 
-    if ( clock_gettime(CLOCK_MONOTONIC,&start_time) != 0 ) 
-    {
-        perror("clock gettime error");
-    } 
+	if ( clock_gettime(CLOCK_MONOTONIC,&start_time) != 0 ) 
+	{
+	perror("clock gettime error");
+	} 
 
-    struct itimerspec itimerspec;
-    itimerspec.it_value.tv_sec = 10;
-    itimerspec.it_value.tv_nsec = 0;
-    itimerspec.it_interval.tv_sec = 10;
-    itimerspec.it_interval.tv_nsec = 0;    
-    
-    if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) 
-    {
-        perror("settime error");
-    } 
+	struct itimerspec itimerspec;
+	itimerspec.it_value.tv_sec = 10;
+	itimerspec.it_value.tv_nsec = 0;
+	itimerspec.it_interval.tv_sec = 10;
+	itimerspec.it_interval.tv_nsec = 0;    
+
+	if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) 
+	{
+	perror("settime error");
+	} 
 	#endif
-    slist_data_t *temp_node = NULL;
+	slist_data_t *temp_node = NULL;
 
-    while(1) 
-    {
+	while(1) 
+	{
 		socklen_t conn_addr_len = sizeof(conn_addr);
 		//Accept an incoming connection
 		client_sock_fd = accept(serv_sock_fd,(struct sockaddr *)&conn_addr,&conn_addr_len);
@@ -567,7 +566,7 @@ int main(int argc, char* argv[])
 		//Check if the connection address family is IPv4 or IPv6 and retrieve accordingly
 		//Convert the binary to text before logging 
 		inet_ntop(AF_INET, get_in_addr((struct sockaddr *)&conn_addr), IP_addr, sizeof(IP_addr));
-        syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);
+		syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);
 
 		slist_ptr = (slist_data_t*)malloc(sizeof(slist_data_t));
 		SLIST_INSERT_HEAD(&head,slist_ptr,entries);                                          

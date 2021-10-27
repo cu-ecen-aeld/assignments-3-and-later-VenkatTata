@@ -23,7 +23,7 @@
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
-MODULE_AUTHOR("Venkat Tata"); /** TODO: fill in your name **/
+MODULE_AUTHOR("Venkat Tata"); 
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
@@ -106,13 +106,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	size_t not_copied_bytes ;
 	struct aesd_dev* my_dev = NULL;
 	const char* discarded_entry = NULL;
-	//char* entry_complete = NULL;
-	
-	
 	my_dev = (filp->private_data);
 
 	PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
-
 	//Interruptible mutex lock 
 	if (mutex_lock_interruptible(&my_dev->lock))
 	{	
@@ -122,10 +118,13 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 	
 	//Full test requires realloc if entry changes	
 	//If not already allocated, reallocate
+	//kzalloc equivalent of calloc
 	if (my_dev->write_entry.size == 0)
 		my_dev->write_entry.buffptr = kzalloc(count,GFP_KERNEL);
 	else
 		my_dev->write_entry.buffptr = krealloc(my_dev->write_entry.buffptr, my_dev->write_entry.size + count, GFP_KERNEL);
+		
+		
 	if (my_dev->write_entry.buffptr == NULL)
 	{ 
 		retval = -ENOMEM;
@@ -219,14 +218,11 @@ int aesd_init_module(void)
 void aesd_cleanup_module(void)
 {
 	dev_t devno = MKDEV(aesd_major, aesd_minor);
-
 	cdev_del(&aesd_device.cdev);
-
 	/**
 	 * TODO: cleanup AESD specific poritions here as necessary
 	 */
 	aesd_circular_buffer_deallocate(&aesd_device.buffer);
-
 	unregister_chrdev_region(devno, 1);
 }
 
