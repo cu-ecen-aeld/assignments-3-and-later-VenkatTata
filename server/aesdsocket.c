@@ -37,12 +37,12 @@
 #define USE_AESD_CHAR_DEVICE 1
 
 #define PORT "9000"
-#define CHUNK_SIZE 500
+#define CHUNK_SIZE 600
 #define BACKLOG 10
 
 #if USE_AESD_CHAR_DEVICE
-//#   define TEST_FILE "/dev/aesdchar"
-//#else
+#   define TEST_FILE "/dev/aesdchar"
+#else
 #   define TEST_FILE "/var/tmp/aesdsocketdata"
 #endif
 
@@ -211,7 +211,15 @@ void* handle_connection(void *threadp)
 		exit(-1);
 	}
     int loc=0,len=0;
-    thread_handle_sock->data_buf = calloc(CHUNK_SIZE,sizeof(char));
+    thread_handle_sock->data_buf = malloc(CHUNK_SIZE * sizeof(char));
+    
+    if (sigprocmask(SIG_BLOCK,&(thread_handle_sock->mask),NULL) == -1)
+    {
+        perror("sigprocmask block error");
+        close_all();
+        exit(-1);
+    }
+    
 	while((len=recv(thread_handle_sock->client_socket , thread_handle_sock->data_buf + loc , CHUNK_SIZE , 0))>0)
 	{
 		if(len == -1)
@@ -237,6 +245,15 @@ void* handle_connection(void *threadp)
 			exit(-1);
 		}
 	}
+	
+	if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
+    {
+        perror("sigprocmask unblock error");
+        close_all();
+        exit(-1);
+    }
+    
+    
 
     if (pthread_mutex_lock( thread_handle_sock->lock) == -1)
     {
@@ -275,9 +292,9 @@ void* handle_connection(void *threadp)
     }
     
     //compute file size
-    int file_length=lseek(output_file_fd,BEGIN,SEEK_END);
-    thread_handle_sock->send_data_buf=calloc(file_size,sizeof(char));
-    syslog(LOG_DEBUG,"file_lenght %d file_size %d",file_length,file_size);
+    //int file_length=lseek(output_file_fd,BEGIN,SEEK_END);
+    thread_handle_sock->send_data_buf=malloc(CHUNK_SIZE * sizeof(char));
+    //syslog(LOG_DEBUG,"file_lenght not therefile_size %d",file_size);
     //set back position to beginning after finding length
     lseek(output_file_fd,BEGIN,SEEK_SET);
     if(thread_handle_sock->send_data_buf == NULL)
@@ -301,22 +318,28 @@ void* handle_connection(void *threadp)
         close_all();
         exit(-1);
     }
-    	
-	int rerr = read(output_file_fd, thread_handle_sock->send_data_buf, file_size);
-	if(rerr == -1 )
+    
+    int read_byte_loc = 0 , send_data_offset=0, rbytes;
+    while((rbytes = read(output_file_fd,&thread_handle_sock->send_data_buf[read_byte_loc],1)) > 0)
+    {
+        if(thread_handle_sock->send_data_buf[read_byte_loc] == '\n')
+        {
+            int serr = send(thread_handle_sock->client_socket,thread_handle_sock->send_data_buf+send_data_offset,read_byte_loc - send_data_offset + 1, 0);
+            if(serr == -1)
+            {
+                perror("send error");
+                close_all();
+            }
+            send_data_offset = read_byte_loc + 1;
+        }
+        read_byte_loc++;
+    }
+    //Only if rbytes negative error. If rerr =0 , can be end of file
+	if(rbytes<0)
 	{
 		perror("read error");
 		close_all();
-		exit(-1);
 	}
-
-	int serr = send(thread_handle_sock->client_socket, thread_handle_sock->send_data_buf, rerr, 0);
-	if(serr == -1 )
-	{
-		perror("send error");
-		close_all();
-		exit(-1);
-	}		
 	
 	thread_handle_sock->thread_complete = true;
     if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
@@ -333,6 +356,8 @@ void* handle_connection(void *threadp)
         close_all();
         exit(-1);
     }
+    
+    close(output_file_fd);
     close(thread_handle_sock->client_socket);
     //Clear both buffers used
     free(thread_handle_sock->data_buf);
@@ -568,3 +593,4 @@ int main(int argc, char* argv[])
 	close_all();
 	return 0;
 }
+
