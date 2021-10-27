@@ -34,19 +34,32 @@
 #include <stdbool.h>
 #include <sys/time.h>
 
+#define USE_AESD_CHAR_DEVICE 1
+
 #define PORT "9000"
 #define CHUNK_SIZE 500
 #define BACKLOG 10
-#define TEST_FILE "/var/tmp/aesdsocketdata"
+
+#if USE_AESD_CHAR_DEVICE
+//#   define TEST_FILE "/dev/aesdchar"
+//#else
+#   define TEST_FILE "/var/tmp/aesdsocketdata"
+#endif
+
 #define BEGIN 0
 
 char IP_addr[INET6_ADDRSTRLEN];
 pthread_mutex_t mutex_test;
+
+#if USE_AESD_CHAR_DEVICE
+#else
 timer_t timerid;
+#endif
+
 int serv_sock_fd,client_sock_fd,counter =1,output_file_fd;
 int finish;
 struct sockaddr_in conn_addr;
-
+int file_size;
 void *get_in_addr(struct sockaddr *sa)
 {
     if (sa->sa_family == AF_INET) {
@@ -66,7 +79,6 @@ typedef struct{
 	pthread_mutex_t *lock;
     bool thread_complete;
     pthread_t threads;               
-    int fd;                            
     int client_socket;                          
     char* data_buf;                    
     char* send_data_buf;
@@ -91,14 +103,19 @@ void close_all(){
 	//checked in this function
 	//All close errors handled in signal handler when no error occured
 	close(serv_sock_fd);
+	
+	#if USE_AESD_CHAR_DEVICE
+	#else
 	//Close regular file - output file fd
 	close(output_file_fd);
+	
+	
 	//Delete and unlink the file
     if(remove(TEST_FILE) != 0)
     {
         perror("file remove error");
     }
-    
+    #endif
     //After completing above procedure successfuly, exit logged
 	syslog(LOG_DEBUG,"Caught signal, exiting");
 	
@@ -119,10 +136,11 @@ void close_all(){
     }
     //Destroy mutex created
     pthread_mutex_destroy(&mutex_test); 
-    
+    #if USE_AESD_CHAR_DEVICE
+    #else
     //Delete timer created for 10 seconds          
     timer_delete(timerid);               
-    
+    #endif
     //close the logging for aesdsocket                              
     closelog();
 }
@@ -137,7 +155,8 @@ static inline void timespec_add( struct timespec *result,
         result->tv_sec ++;
     }
 }
-
+#if USE_AESD_CHAR_DEVICE
+#else
 static void timer_handle(union sigval sigval){
 
     struct sigsev_data* td = (struct sigsev_data*) sigval.sival_ptr;
@@ -171,7 +190,7 @@ static void timer_handle(union sigval sigval){
         exit(-1);
     }
 }
-
+#endif
 static void signal_handler(int signo)
 {
    if(signo == SIGINT || signo==SIGTERM) 
@@ -185,6 +204,12 @@ void* handle_connection(void *threadp)
 {
 
     threadParams_t *thread_handle_sock = (threadParams_t*)threadp;
+    output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
+	if(output_file_fd == -1)
+	{
+		perror("error opening file at /var/temp/aesdsocketdata");
+		exit(-1);
+	}
     int loc=0,len=0;
     thread_handle_sock->data_buf = calloc(CHUNK_SIZE,sizeof(char));
 	while((len=recv(thread_handle_sock->client_socket , thread_handle_sock->data_buf + loc , CHUNK_SIZE , 0))>0)
@@ -228,14 +253,14 @@ void* handle_connection(void *threadp)
         exit(-1);
     }
 
-    int werr = write(thread_handle_sock->fd,thread_handle_sock->data_buf,loc);
+    int werr = write(output_file_fd,thread_handle_sock->data_buf,loc);
     if (werr == -1)
     {
         perror("write error");
         close_all();
         exit(-1);
     }
-	
+	file_size += werr;
     if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
     {
         perror("sigprocmask unblock error");
@@ -250,10 +275,11 @@ void* handle_connection(void *threadp)
     }
     
     //compute file size
-    int file_length=lseek(thread_handle_sock->fd,BEGIN,SEEK_END);
-    thread_handle_sock->send_data_buf=calloc(file_length,sizeof(char));
+    int file_length=lseek(output_file_fd,BEGIN,SEEK_END);
+    thread_handle_sock->send_data_buf=calloc(file_size,sizeof(char));
+    syslog(LOG_DEBUG,"file_lenght %d file_size %d",file_length,file_size);
     //set back position to beginning after finding length
-    lseek(thread_handle_sock->fd,BEGIN,SEEK_SET);
+    lseek(output_file_fd,BEGIN,SEEK_SET);
     if(thread_handle_sock->send_data_buf == NULL)
 	{
 		perror("calloc error");
@@ -276,7 +302,7 @@ void* handle_connection(void *threadp)
         exit(-1);
     }
     	
-	int rerr = read(thread_handle_sock->fd, thread_handle_sock->send_data_buf, file_length);
+	int rerr = read(output_file_fd, thread_handle_sock->send_data_buf, file_size);
 	if(rerr == -1 )
 	{
 		perror("read error");
@@ -414,14 +440,10 @@ int main(int argc, char* argv[])
 		perror("error listening");
 		exit(-1);
 	}
-
-	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
-	if(output_file_fd == -1)
-	{
-		perror("error opening file at /var/temp/aesdsocketdata");
-		exit(-1);
-	}
-    
+	
+	
+	
+    //#endif
     if (pthread_mutex_init(&mutex_test,NULL) != 0)
     {
         perror("dynamic mutex init error");
@@ -468,6 +490,8 @@ int main(int argc, char* argv[])
 		dup (0); 
 	}
 
+	#if USE_AESD_CHAR_DEVICE
+	#else
 	//Below timer reference : https://github.com/cu-ecen-aeld/aesd-lectures/blob/master/lecture9/timer_thread.c
     struct sigevent sev;
     sigsev_data td;
@@ -497,7 +521,7 @@ int main(int argc, char* argv[])
     {
         perror("settime error");
     } 
-
+	#endif
     slist_data_t *temp_node = NULL;
 
     while(1) 
@@ -524,7 +548,7 @@ int main(int argc, char* argv[])
 		SLIST_INSERT_HEAD(&head,slist_ptr,entries);                                          
 		slist_ptr->threadParams.client_socket = client_sock_fd;
 		slist_ptr->threadParams.thread_complete = false;
-		slist_ptr->threadParams.fd=output_file_fd;
+		//slist_ptr->threadParams.fd=output_file_fd;
 		slist_ptr->threadParams.mask = socket_set;
 		slist_ptr->threadParams.lock = &mutex_test;
 

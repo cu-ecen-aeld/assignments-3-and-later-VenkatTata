@@ -67,12 +67,18 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
+	 /**
+    * TODO: implement per description 
+    */
+    
+    const char* overwritten_entry=NULL;
 	//Check if the buffer is not NULL
 	if(buffer == NULL)
-		return;
-	
+		return NULL;
+	if(buffer->full)
+		overwritten_entry= buffer->entry[buffer->out_offs].buffptr;
 	//Store the buffptr and its size into circular buffer
 	buffer->entry[buffer->in_offs] = *add_entry;
 	
@@ -80,22 +86,26 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
 	//"in" equals "out" the buffer is set to full. Once the buffer is full, the "out" is incremented by 1 and on
 	//reaching the end of circular buffer, just like the "in" , even the "out" is wrapped around
 	if(buffer->out_offs != buffer->in_offs)
-    {
-		buffer->full = false;
-    }
-    else
-    {
-		if(buffer->initial == false)
-		{
-			buffer->full = true;
-			buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-		}
-		else
-			buffer->initial=false;
+	{
+	buffer->full = false;
+	}
+	else if (buffer->out_offs == buffer->in_offs)
+	{
+			if(buffer->initial == false)
+			{
+				buffer->full = true;
+
+
+				buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+			}
+			else
+				buffer->initial=false;
 	}
 	
 	//Increment the buffer position and wrap around if end of buffer is reached
     buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    return overwritten_entry;
 }
 
 /**
@@ -105,4 +115,23 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
     memset(buffer,0,sizeof(struct aesd_circular_buffer));
     buffer->initial=true;
+}
+
+void aesd_circular_buffer_deallocate(struct aesd_circular_buffer *buffer)
+{
+	uint8_t index;
+	struct aesd_circular_buffer *buf = buffer;
+	struct aesd_buffer_entry *entry;
+	AESD_CIRCULAR_BUFFER_FOREACH(entry,buf,index) 
+	{
+		if(entry->buffptr != NULL)
+		{
+			#ifdef __KERNEL__
+				kfree(entry->buffptr);
+			#else
+				free(entry->buffptr);	
+			#endif
+		}
+		
+	}
 }
