@@ -34,19 +34,32 @@
 #include <stdbool.h>
 #include <sys/time.h>
 
+#define USE_AESD_CHAR_DEVICE 1
+
 #define PORT "9000"
-#define CHUNK_SIZE 500
+#define CHUNK_SIZE 600
 #define BACKLOG 10
-#define TEST_FILE "/var/tmp/aesdsocketdata"
+
+#if USE_AESD_CHAR_DEVICE
+#   define TEST_FILE "/dev/aesdchar"
+#else
+#   define TEST_FILE "/var/tmp/aesdsocketdata"
+#endif
+
 #define BEGIN 0
 
 char IP_addr[INET6_ADDRSTRLEN];
 pthread_mutex_t mutex_test;
+
+#if USE_AESD_CHAR_DEVICE
+#else
 timer_t timerid;
+#endif
+
 int serv_sock_fd,client_sock_fd,counter =1,output_file_fd;
 int finish;
 struct sockaddr_in conn_addr;
-
+int file_size;
 void *get_in_addr(struct sockaddr *sa)
 {
     if (sa->sa_family == AF_INET) {
@@ -66,7 +79,6 @@ typedef struct{
 	pthread_mutex_t *lock;
     bool thread_complete;
     pthread_t threads;               
-    int fd;                            
     int client_socket;                          
     char* data_buf;                    
     char* send_data_buf;
@@ -91,14 +103,19 @@ void close_all(){
 	//checked in this function
 	//All close errors handled in signal handler when no error occured
 	close(serv_sock_fd);
+	
+	#if USE_AESD_CHAR_DEVICE
+	#else
 	//Close regular file - output file fd
 	close(output_file_fd);
+	
+	
 	//Delete and unlink the file
     if(remove(TEST_FILE) != 0)
     {
         perror("file remove error");
     }
-    
+    #endif
     //After completing above procedure successfuly, exit logged
 	syslog(LOG_DEBUG,"Caught signal, exiting");
 	
@@ -119,10 +136,11 @@ void close_all(){
     }
     //Destroy mutex created
     pthread_mutex_destroy(&mutex_test); 
-    
+    #if USE_AESD_CHAR_DEVICE
+    #else
     //Delete timer created for 10 seconds          
     timer_delete(timerid);               
-    
+    #endif
     //close the logging for aesdsocket                              
     closelog();
 }
@@ -137,7 +155,8 @@ static inline void timespec_add( struct timespec *result,
         result->tv_sec ++;
     }
 }
-
+#if USE_AESD_CHAR_DEVICE
+#else
 static void timer_handle(union sigval sigval){
 
     struct sigsev_data* td = (struct sigsev_data*) sigval.sival_ptr;
@@ -171,7 +190,7 @@ static void timer_handle(union sigval sigval){
         exit(-1);
     }
 }
-
+#endif
 static void signal_handler(int signo)
 {
    if(signo == SIGINT || signo==SIGTERM) 
@@ -185,8 +204,22 @@ void* handle_connection(void *threadp)
 {
 
     threadParams_t *thread_handle_sock = (threadParams_t*)threadp;
+    output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
+	if(output_file_fd == -1)
+	{
+		perror("error opening file at /var/temp/aesdsocketdata");
+		exit(-1);
+	}
     int loc=0,len=0;
-    thread_handle_sock->data_buf = calloc(CHUNK_SIZE,sizeof(char));
+    thread_handle_sock->data_buf = malloc(CHUNK_SIZE * sizeof(char));
+    
+    if (sigprocmask(SIG_BLOCK,&(thread_handle_sock->mask),NULL) == -1)
+    {
+        perror("sigprocmask block error");
+        close_all();
+        exit(-1);
+    }
+    
 	while((len=recv(thread_handle_sock->client_socket , thread_handle_sock->data_buf + loc , CHUNK_SIZE , 0))>0)
 	{
 		if(len == -1)
@@ -212,6 +245,15 @@ void* handle_connection(void *threadp)
 			exit(-1);
 		}
 	}
+	
+	if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
+    {
+        perror("sigprocmask unblock error");
+        close_all();
+        exit(-1);
+    }
+    
+    
 
     if (pthread_mutex_lock( thread_handle_sock->lock) == -1)
     {
@@ -228,14 +270,14 @@ void* handle_connection(void *threadp)
         exit(-1);
     }
 
-    int werr = write(thread_handle_sock->fd,thread_handle_sock->data_buf,loc);
+    int werr = write(output_file_fd,thread_handle_sock->data_buf,loc);
     if (werr == -1)
     {
         perror("write error");
         close_all();
         exit(-1);
     }
-	
+	file_size += werr;
     if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
     {
         perror("sigprocmask unblock error");
@@ -250,10 +292,10 @@ void* handle_connection(void *threadp)
     }
     
     //compute file size
-    int file_length=lseek(thread_handle_sock->fd,BEGIN,SEEK_END);
-    thread_handle_sock->send_data_buf=calloc(file_length,sizeof(char));
+    //int file_length=lseek(output_file_fd,BEGIN,SEEK_END);
+    thread_handle_sock->send_data_buf=malloc(CHUNK_SIZE * sizeof(char));
     //set back position to beginning after finding length
-    lseek(thread_handle_sock->fd,BEGIN,SEEK_SET);
+    lseek(output_file_fd,BEGIN,SEEK_SET);
     if(thread_handle_sock->send_data_buf == NULL)
 	{
 		perror("calloc error");
@@ -275,22 +317,28 @@ void* handle_connection(void *threadp)
         close_all();
         exit(-1);
     }
-    	
-	int rerr = read(thread_handle_sock->fd, thread_handle_sock->send_data_buf, file_length);
-	if(rerr == -1 )
+    
+    int read_byte_loc = 0 , send_data_offset=0, rbytes;
+    while((rbytes = read(output_file_fd,&thread_handle_sock->send_data_buf[read_byte_loc],1)) > 0)
+    {
+        if(thread_handle_sock->send_data_buf[read_byte_loc] == '\n')
+        {
+            int serr = send(thread_handle_sock->client_socket,thread_handle_sock->send_data_buf+send_data_offset,read_byte_loc - send_data_offset + 1, 0);
+            if(serr == -1)
+            {
+                perror("send error");
+                close_all();
+            }
+            send_data_offset = read_byte_loc + 1;
+        }
+        read_byte_loc++;
+    }
+    //Only if rbytes negative error. If rerr =0 , can be end of file
+	if(rbytes<0)
 	{
 		perror("read error");
 		close_all();
-		exit(-1);
 	}
-
-	int serr = send(thread_handle_sock->client_socket, thread_handle_sock->send_data_buf, rerr, 0);
-	if(serr == -1 )
-	{
-		perror("send error");
-		close_all();
-		exit(-1);
-	}		
 	
 	thread_handle_sock->thread_complete = true;
     if (sigprocmask(SIG_UNBLOCK,&(thread_handle_sock->mask),NULL) == -1)
@@ -307,6 +355,8 @@ void* handle_connection(void *threadp)
         close_all();
         exit(-1);
     }
+    
+    close(output_file_fd);
     close(thread_handle_sock->client_socket);
     //Clear both buffers used
     free(thread_handle_sock->data_buf);
@@ -414,14 +464,10 @@ int main(int argc, char* argv[])
 		perror("error listening");
 		exit(-1);
 	}
-
-	output_file_fd=open(TEST_FILE,O_CREAT|O_RDWR|O_APPEND,0644);
-	if(output_file_fd == -1)
-	{
-		perror("error opening file at /var/temp/aesdsocketdata");
-		exit(-1);
-	}
-    
+	
+	
+	
+    //#endif
     if (pthread_mutex_init(&mutex_test,NULL) != 0)
     {
         perror("dynamic mutex init error");
@@ -468,40 +514,42 @@ int main(int argc, char* argv[])
 		dup (0); 
 	}
 
+	#if USE_AESD_CHAR_DEVICE
+	#else
 	//Below timer reference : https://github.com/cu-ecen-aeld/aesd-lectures/blob/master/lecture9/timer_thread.c
-    struct sigevent sev;
-    sigsev_data td;
-    td.fd = output_file_fd;
-    memset(&sev,0,sizeof(struct sigevent));
-    sev.sigev_notify = SIGEV_THREAD;
-    sev.sigev_value.sival_ptr = &td;
-    sev.sigev_notify_function = timer_handle;
-    if ( timer_create(CLOCK_MONOTONIC,&sev,&timerid) != 0 ) 
-    {
-        perror("timer create error");
-    }
-    struct timespec start_time;
+	struct sigevent sev;
+	sigsev_data td;
+	td.fd = output_file_fd;
+	memset(&sev,0,sizeof(struct sigevent));
+	sev.sigev_notify = SIGEV_THREAD;
+	sev.sigev_value.sival_ptr = &td;
+	sev.sigev_notify_function = timer_handle;
+	if ( timer_create(CLOCK_MONOTONIC,&sev,&timerid) != 0 ) 
+	{
+	perror("timer create error");
+	}
+	struct timespec start_time;
 
-    if ( clock_gettime(CLOCK_MONOTONIC,&start_time) != 0 ) 
-    {
-        perror("clock gettime error");
-    } 
+	if ( clock_gettime(CLOCK_MONOTONIC,&start_time) != 0 ) 
+	{
+	perror("clock gettime error");
+	} 
 
-    struct itimerspec itimerspec;
-    itimerspec.it_value.tv_sec = 10;
-    itimerspec.it_value.tv_nsec = 0;
-    itimerspec.it_interval.tv_sec = 10;
-    itimerspec.it_interval.tv_nsec = 0;    
-    
-    if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) 
-    {
-        perror("settime error");
-    } 
+	struct itimerspec itimerspec;
+	itimerspec.it_value.tv_sec = 10;
+	itimerspec.it_value.tv_nsec = 0;
+	itimerspec.it_interval.tv_sec = 10;
+	itimerspec.it_interval.tv_nsec = 0;    
 
-    slist_data_t *temp_node = NULL;
+	if( timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL ) != 0 ) 
+	{
+	perror("settime error");
+	} 
+	#endif
+	slist_data_t *temp_node = NULL;
 
-    while(1) 
-    {
+	while(1) 
+	{
 		socklen_t conn_addr_len = sizeof(conn_addr);
 		//Accept an incoming connection
 		client_sock_fd = accept(serv_sock_fd,(struct sockaddr *)&conn_addr,&conn_addr_len);
@@ -518,13 +566,13 @@ int main(int argc, char* argv[])
 		//Check if the connection address family is IPv4 or IPv6 and retrieve accordingly
 		//Convert the binary to text before logging 
 		inet_ntop(AF_INET, get_in_addr((struct sockaddr *)&conn_addr), IP_addr, sizeof(IP_addr));
-        syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);
+		syslog(LOG_DEBUG,"Accepted connection from %s", IP_addr);
 
 		slist_ptr = (slist_data_t*)malloc(sizeof(slist_data_t));
 		SLIST_INSERT_HEAD(&head,slist_ptr,entries);                                          
 		slist_ptr->threadParams.client_socket = client_sock_fd;
 		slist_ptr->threadParams.thread_complete = false;
-		slist_ptr->threadParams.fd=output_file_fd;
+		//slist_ptr->threadParams.fd=output_file_fd;
 		slist_ptr->threadParams.mask = socket_set;
 		slist_ptr->threadParams.lock = &mutex_test;
 
@@ -544,3 +592,4 @@ int main(int argc, char* argv[])
 	close_all();
 	return 0;
 }
+
